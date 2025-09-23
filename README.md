@@ -1,7 +1,7 @@
-# StableGuard: Towards Unified Copyright Protection and Tamper Localization in Latent Diffusion Models (Neurips 2025)
+# StableGuard: Towards Unified Copyright Protection and Tamper Localization in Latent Diffusion Models (NeurIPS 2025)
 ---
 
-*This repo contains the training and inference code for our StableGuard paper.*
+*This repo contains the training and inference code for our StableGuard paper (NeurIPS 2025).*
 
 > **[StableGuard: Towards Unified Copyright Protection and Tamper Localization in Latent Diffusion Models](https://arxiv.org/abs/2509.17993)**  <br>
 > Haoxin Yang, Bangzhen Liu, Xuemiao Xu, Cheng Xu, Yuyang Yu, Zikai Huang, Yi Wang, Shengfeng He \
