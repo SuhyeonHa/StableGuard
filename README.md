@@ -61,8 +61,8 @@ Our method is trained on images with a resolution of 256×256 to improve trainin
 python inference.py 
 ```
 For clean image inference, use weights in folder `weights/clean`. \
-For degradation image inference, use weights in folder `weights/degradation`.
-
+For degradation image inference, use weights in folder `weights/degradation`. \
+You can use `inference_fast.py` for faster inference, which would not save intermediate results.
 
 ## Acknowledgement
 This repository borrows from [IMDLBenCo](https://github.com/scu-zjz/IMDLBenCo) and [Watermark Anything](https://github.com/facebookresearch/watermark-anything). \

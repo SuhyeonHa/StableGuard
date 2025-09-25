@@ -1,7 +1,8 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]='4'
 import warnings
+# Suppress warnings for cleaner output
 warnings.filterwarnings("ignore")
+
 from PIL import Image
 from torchvision.transforms import transforms as T
 from tqdm import tqdm
@@ -13,75 +14,118 @@ from torchvision.utils import save_image
 from torchvision.transforms import transforms
 from piq import ssim, psnr, LPIPS
 
-
 from evaluation import PixelF1, PixelAUC, PixelIOU, PixelAccuracy
 from dataset import ImageDataset, image_collate_fn
 import random
 from models import MultiplexingWatermarkVAEDecoder, MoEGuidedForensicNet
 
 
-
 def denormalize_tensor(tensor, value_range=None, scale_each=True):
-    tensor = tensor.clone()  # avoid modifying tensor in-place
+    """
+    Normalize tensor values into [0,1] (in-place style but returns a cloned tensor).
+    This helper is used before feeding images to image-quality metrics such as PSNR/SSIM/LPIPS.
+
+    Args:
+        tensor (torch.Tensor): input tensor with shape (B, C, H, W) or (C, H, W).
+        value_range (tuple or None): (min, max) range to clamp before scaling. If None, uses tensor-specific min/max.
+        scale_each (bool): if True, normalize every image in the batch separately; otherwise normalize whole tensor together.
+
+    Returns:
+        torch.Tensor: cloned and normalized tensor in range [0,1].
+    """
+    tensor = tensor.clone()  # avoid modifying caller's tensor
+
+    # Validate value_range argument
     if value_range is not None and not isinstance(value_range, tuple):
         raise TypeError("value_range has to be a tuple (min, max) if specified. min and max are numbers")
 
+    # In-place clamp/shift/scale helper
     def norm_ip(img, low, high):
         img.clamp_(min=low, max=high)
         img.sub_(low).div_(max(high - low, 1e-5))
 
+    # Choose whether to use provided range or tensor's min/max
     def norm_range(t, value_range):
         if value_range is not None:
             norm_ip(t, value_range[0], value_range[1])
         else:
             norm_ip(t, float(t.min()), float(t.max()))
 
+    # Normalize each image separately or the whole tensor
     if scale_each is True:
-        for t in tensor:  # loop over mini-batch dimension
+        for t in tensor:  # iterate over batch dimension
             norm_range(t, value_range)
     else:
         norm_range(tensor, value_range)
-    
+
     return tensor
 
+
 class Evalution(object):
+    """
+    Simple evaluation helper that reads predicted mask images from disk,
+    compares them to ground-truth masks and accumulates pixel-level metrics.
+
+    This class relies on PixelF1, PixelAUC, PixelIOU, PixelAccuracy interfaces
+    which expose batch_update(predict=..., mask=...) and Cal_FPR(...).
+    """
+
     def __init__(self, pred_path, gt_path) -> None:
+        """
+        Args:
+            pred_path (str): directory containing predicted mask images/files.
+            gt_path (str): directory containing ground-truth mask images/files.
+        """
         self.pred_path = pred_path
         self.gt_path = gt_path
+        # instantiate metric calculators
         self.f1 = PixelF1()
         self.auc = PixelAUC()
         self.iou = PixelIOU()
         self.acc = PixelAccuracy()
-        
-
 
     def run(self, save_path):
+        """
+        Iterate over predicted masks found in self.pred_path, load the corresponding ground-truth,
+        compute per-file pixel metrics, accumulate them, print a summary and append to a record file.
+
+        Args:
+            save_path (str): directory in which to write record.txt (appends).
+        """
         total_f1 = []
         total_auc = []
         total_iou = []
         total_acc = []
         total_fpr = []
 
+        # list prediction files in prediction directory
         pred_images_path = os.listdir(self.pred_path)
 
+        # iterate through each predicted mask filename
         for pred_image_path in tqdm(pred_images_path):
             try:
+                # open predicted mask and corresponding ground-truth mask as grayscale
                 pred_image = Image.open(os.path.join(self.pred_path, pred_image_path)).convert("L")
                 gt_image = Image.open(os.path.join(self.gt_path, pred_image_path)).convert("L")
-            except:
+            except Exception:
+                # skip files that cannot be opened / matched
                 continue
 
+            # convert PIL images to tensors with shape (1, C, H, W)
             pred_tensor = T.ToTensor()(pred_image).unsqueeze(0)
             gt_tensor = T.ToTensor()(gt_image).unsqueeze(0)
+
+            # resize ground-truth to match predicted mask spatial size if needed
             gt_tensor = torch.nn.functional.interpolate(gt_tensor, (pred_tensor.size(2), pred_tensor.size(3)))
-            
+
+            # call evaluator batch_update for each metric (these update internal state or return stat)
             f1 = self.f1.batch_update(predict=pred_tensor, mask=gt_tensor)
             auc = self.auc.batch_update(predict=pred_tensor, mask=gt_tensor)
             iou = self.iou.batch_update(predict=pred_tensor, mask=gt_tensor)
             acc = self.acc.batch_update(predict=pred_tensor, mask=gt_tensor)
             fpr = self.f1.Cal_FPR(predict=pred_tensor, mask=gt_tensor)
 
-
+            # append scalars to lists, skipping NaNs
             if not torch.any(torch.isnan(f1)):
                 total_f1.append(f1.item())
             if not torch.any(torch.isnan(auc)):
@@ -93,28 +137,57 @@ class Evalution(object):
             if not torch.any(torch.isnan(fpr)):
                 total_fpr.append(fpr.item())
 
+        # compute aggregated means and print/write a summary line
         msg = f"Tampering F1:{np.mean(total_f1):.5f}, AUC:{np.mean(total_auc):.5f}, IoU: {np.mean(total_iou):.5f}, Acc: {np.mean(total_acc):.5f}, FPR: {np.mean(total_fpr):.5f}\n"
-
         print(msg)
-        
+
+        # append to record file under save_path
         with open(os.path.join(save_path, "record.txt"), "a+") as f:
             f.write(msg)
 
+
 @torch.no_grad()
 def generate_watermark_image(weight_path, src_image_path, save_path, num_bits=48, size=512):
+    """
+    Generate watermarked and tampered images from a source dataset using:
+      - a pretrained diffusion VAE for reconstructing images (AutoencoderKL),
+      - a MultiplexingWatermark VAEDecoder to inject watermark bits into latents.
+
+    For each input image the function:
+      1) encodes and decodes via the diffusion VAE,
+      2) generates a random binary message vector (msgs),
+      3) produces a watermarked cover image from VAE latents + msgs,
+      4) composes a tampered image by replacing masked regions with generated content,
+      5) computes and accumulates image-similarity metrics (PSNR/SSIM/LPIPS),
+      6) saves cover/tamper/gt/msg files to disk under save_path.
+
+    Args:
+        weight_path (str): directory where model weight files reside (expects mpw_vae_decoder.bin).
+        src_image_path (str): data root that ImageDataset reads from (validation set).
+        save_path (str): base directory to write outputs ('cover_images', 'tamper_images', 'gt', 'msgs').
+        num_bits (int): number of watermark bits to embed.
+        size (int): image size used by the dataset (ImageDataset will resize).
+    """
+    # create output subdirectories
     res = ['cover_images', 'tamper_images', 'gt', 'msgs']
     for n in res:
         os.makedirs(os.path.join(save_path, '%s' % n), exist_ok=True)
 
+    # load pretrained diffusion VAE (encoder/decoder)
     original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae")
+
+    # initialize and load weights for MultiplexingWatermarkVAEDecoder
     mpw_vae_decoder = MultiplexingWatermarkVAEDecoder(num_bits=num_bits)
     mpw_vae_decoder_weight = torch.load(os.path.join(weight_path, "mpw_vae_decoder.bin"), map_location="cpu")
     mpw_vae_decoder.load_state_dict(mpw_vae_decoder_weight)
+
+    # move models to GPU and set eval mode
     original_vae = original_vae.cuda()
     mpw_vae_decoder = mpw_vae_decoder.cuda()
     original_vae.eval()
     mpw_vae_decoder.eval()
 
+    # prepare dataloader for validation images
     val_dataset = ImageDataset(data_root=src_image_path, mode="val", size=size)
     val_dataloader = DataLoader(
         val_dataset,
@@ -125,6 +198,7 @@ def generate_watermark_image(weight_path, src_image_path, save_path, num_bits=48
         drop_last=False,
     )
 
+    # accumulators for image-similarity metrics (per-image appended scalars)
     sd_real_psnr_list = []
     sd_real_ssim_list = []
     sd_real_lpips_list = []
@@ -137,34 +211,63 @@ def generate_watermark_image(weight_path, src_image_path, save_path, num_bits=48
     wm_sd_ssim_list = []
     wm_sd_lpips_list = []
 
+    # iterate over the validation dataloader
     for batch in tqdm(val_dataloader):
+        # move batch tensors to GPU
         images = batch["images"].cuda()
         generated_images = batch["generated_images"].cuda()
         masks = batch["masks"].cuda()
         image_names = batch["image_names"]
 
+        # VAE encode -> sample latents -> decode back to image (reconstruction)
         latents = original_vae.encode(images).latent_dist.sample()
         decode_images = original_vae.decode(latents, return_dict=False)[0]
+
+        # prepare latents for the watermark decoder (post-quant conv if required by model)
         latents = original_vae.post_quant_conv(latents)
-        phi = torch.empty(latents.size(0), num_bits).uniform_(0,1).cuda()
-        msgs = (torch.bernoulli(phi) + 1e-8)
+
+        # sample random binary messages for this batch
+        phi = torch.empty(latents.size(0), num_bits).uniform_(0, 1).cuda()
+        msgs = (torch.bernoulli(phi) + 1e-8)  # small eps to avoid exact zeros if needed
+
+        # produce watermarked cover images from latents+msgs
         cover_images = mpw_vae_decoder(latents, msgs=msgs)
 
-        tamper_images = masks * generated_images + (1-masks) * cover_images
+        # compose tampered images: replace regions indicated by mask with generated content
+        tamper_images = masks * generated_images + (1 - masks) * cover_images
 
-        
-        sd_real_psnr_list.append(psnr(denormalize_tensor(images), denormalize_tensor(decode_images), data_range=1).item())
-        sd_real_ssim_list.append(ssim(denormalize_tensor(images), denormalize_tensor(decode_images), data_range=1).item())
-        sd_real_lpips_list.append(LPIPS(reduction='none')(denormalize_tensor(images), denormalize_tensor(decode_images)).mean().item())
+        # compute image similarity metrics and append their values (per-image scalars)
+        sd_real_psnr_list.append(
+            psnr(denormalize_tensor(images), denormalize_tensor(decode_images), data_range=1).item()
+        )
+        sd_real_ssim_list.append(
+            ssim(denormalize_tensor(images), denormalize_tensor(decode_images), data_range=1).item()
+        )
+        sd_real_lpips_list.append(
+            LPIPS(reduction='none')(denormalize_tensor(images), denormalize_tensor(decode_images)).mean().item()
+        )
 
-        wm_real_psnr_list.append(psnr(denormalize_tensor(images), denormalize_tensor(cover_images), data_range=1).item())
-        wm_real_ssim_list.append(ssim(denormalize_tensor(images), denormalize_tensor(cover_images), data_range=1).item())
-        wm_real_lpips_list.append(LPIPS(reduction='none')(denormalize_tensor(images), denormalize_tensor(cover_images)).mean().item())
+        wm_real_psnr_list.append(
+            psnr(denormalize_tensor(images), denormalize_tensor(cover_images), data_range=1).item()
+        )
+        wm_real_ssim_list.append(
+            ssim(denormalize_tensor(images), denormalize_tensor(cover_images), data_range=1).item()
+        )
+        wm_real_lpips_list.append(
+            LPIPS(reduction='none')(denormalize_tensor(images), denormalize_tensor(cover_images)).mean().item()
+        )
 
-        wm_sd_psnr_list.append(psnr(denormalize_tensor(decode_images), denormalize_tensor(cover_images), data_range=1).item())
-        wm_sd_ssim_list.append(ssim(denormalize_tensor(decode_images), denormalize_tensor(cover_images), data_range=1).item())
-        wm_sd_lpips_list.append(LPIPS(reduction='none')(denormalize_tensor(decode_images), denormalize_tensor(cover_images)).mean().item())
+        wm_sd_psnr_list.append(
+            psnr(denormalize_tensor(decode_images), denormalize_tensor(cover_images), data_range=1).item()
+        )
+        wm_sd_ssim_list.append(
+            ssim(denormalize_tensor(decode_images), denormalize_tensor(cover_images), data_range=1).item()
+        )
+        wm_sd_lpips_list.append(
+            LPIPS(reduction='none')(denormalize_tensor(decode_images), denormalize_tensor(cover_images)).mean().item()
+        )
 
+        # save per-image outputs: cover, tamper, ground-truth mask, and message vector
         for i in range(images.size(0)):
             save_file_name = image_names[i]
             cover_image = cover_images[i]
@@ -172,71 +275,101 @@ def generate_watermark_image(weight_path, src_image_path, save_path, num_bits=48
             mask = masks[i]
             msg = msgs[i]
 
+            # make each a single-image tensor and convert to uint8 PIL before saving
             cover_image = cover_image.unsqueeze(0)
             tamper_image = tamper_image.unsqueeze(0)
             mask = mask.unsqueeze(0)
             msg = msg.unsqueeze(0)
 
-
-            cover_image = (cover_image / 2 + 0.5).clamp(0, 1) 
+            # cover image: convert from model range [-1,1] to [0,255] uint8
+            cover_image = (cover_image / 2 + 0.5).clamp(0, 1)
             cover_image = cover_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
             cover_image = (cover_image * 255).astype(np.uint8)
             cover_image_pil = Image.fromarray(cover_image)
 
+            # tamper image: same conversion
             tamper_image = (tamper_image / 2 + 0.5).clamp(0, 1)
             tamper_image = tamper_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
             tamper_image = (tamper_image * 255).astype(np.uint8)
             tamper_image_pil = Image.fromarray(tamper_image)
 
+            # save cover and tamper images as PNG (replace .jpg extension if present)
             cover_image_pil.save(os.path.join(save_path, 'cover_images', save_file_name.replace("jpg", "png")))
             tamper_image_pil.save(os.path.join(save_path, 'tamper_images', save_file_name.replace("jpg", "png")))
 
+            # save ground-truth mask as image tensor and message vector as .pt file
             save_image(mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
-            torch.save(msg, os.path.join(save_path, 'msgs', save_file_name.split(".")[0]+'.pt'))
+            torch.save(msg, os.path.join(save_path, 'msgs', save_file_name.split(".")[0] + '.pt'))
 
-    # SD vs Real:  Image similarity between the real image and the original diffusion VAE reconstruction
-    # WM vs Real:  Image similarity between the real image and the watermarked image
-    # WM vs SD:  Image similarity between the StableGuard image and the original diffusion VAE reconstruction
-    # The error mainly comes from the original diffusion VAE reconstruction
-    msg =  f"SD vs Real | PSNR: {np.mean(sd_real_psnr_list):.5f}, SSIM: {np.mean(sd_real_ssim_list):.5f}, LPIPS: {np.mean(sd_real_lpips_list):.5f} \n" 
-    msg += f"WM vs Real | PSNR: {np.mean(wm_real_psnr_list):.5f}, SSIM: {np.mean(wm_real_ssim_list):.5f}, LPIPS: {np.mean(wm_real_lpips_list):.5f} \n" 
-    msg += f"WM vs SD   | PSNR: {np.mean(wm_sd_psnr_list):.5f}, SSIM: {np.mean(wm_sd_ssim_list):.5f}, LPIPS: {np.mean(wm_sd_lpips_list):.5f} \n" 
+    # After processing all batches, summarise the image-similarity metrics across the dataset
+    # SD vs Real:  similarity between original image and VAE reconstruction
+    # WM vs Real:  similarity between original image and watermarked image
+    # WM vs SD:    similarity between watermarked image and VAE reconstruction
+    # note: main error source often comes from the diffusion VAE reconstruction
+    msg = f"SD vs Real | PSNR: {np.mean(sd_real_psnr_list):.5f}, SSIM: {np.mean(sd_real_ssim_list):.5f}, LPIPS: {np.mean(sd_real_lpips_list):.5f} \n"
+    msg += f"WM vs Real | PSNR: {np.mean(wm_real_psnr_list):.5f}, SSIM: {np.mean(wm_real_ssim_list):.5f}, LPIPS: {np.mean(wm_real_lpips_list):.5f} \n"
+    msg += f"WM vs SD   | PSNR: {np.mean(wm_sd_psnr_list):.5f}, SSIM: {np.mean(wm_sd_ssim_list):.5f}, LPIPS: {np.mean(wm_sd_lpips_list):.5f} \n"
     msg += "-" * 100 + "\n"
     print(msg)
+
+    # write summary into record.txt (overwrite previous content)
     with open(os.path.join(save_path, "record.txt"), "w") as f:
         f.write(msg)
 
+
 @torch.no_grad()
 def generate_tamper_mask(weight_path, tamper_image_path, save_path, num_bits=48, size=512):
+    """
+    Use the trained forensic network (MoEGuidedForensicNet) to predict:
+      - the embedded messages for each tampered image
+      - the tampering mask (pixel-level prediction).
+
+    The function iterates through image files in tamper_image_path, resizes them,
+    runs the detector, saves predicted masks to disk and computes bit accuracy.
+    """
+    # make output folder for predicted masks
     os.makedirs(os.path.join(save_path, "pred_mask"), exist_ok=True)
+
+    # initialize and load the detector model
     moe_gfn = MoEGuidedForensicNet(num_bits=num_bits)
     moe_gfn_weight = torch.load(os.path.join(weight_path, "moe_gfn.bin"), map_location="cpu")
     moe_gfn.load_state_dict(moe_gfn_weight)
     moe_gfn = moe_gfn.cuda()
     moe_gfn.eval()
+
     bit_acc = []
     image_paths = os.listdir(tamper_image_path)
     image_paths.sort()
 
-    i = 0
+    # iterate files and run inference on each image (single-image inference)
     for image_path in tqdm(image_paths):
+        # load and resize image to expected input size
         image = Image.open(os.path.join(tamper_image_path, image_path)).resize((size, size))
         transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Lambda(lambda x: x * 2 - 1),
+            transforms.Lambda(lambda x: x * 2 - 1),  # map [0,1] -> [-1,1] if model expects that
         ])
-        image = transform(image).unsqueeze(0)
+        image = transform(image).unsqueeze(0)  # shape [1, C, H, W]
+
+        # run detector on GPU
         pred_msgs, pred_mask = moe_gfn(image.cuda())
 
+        # convert mask logits to probabilities
         pred_mask = torch.sigmoid(pred_mask)
-        save_image(pred_mask, os.path.join(save_path, 'pred_mask', image_path), normalize=False, scale_each=True)
-        save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0]+'.pt'))
 
+        # save predicted mask image to disk
+        save_image(pred_mask, os.path.join(save_path, 'pred_mask', image_path), normalize=False, scale_each=True)
+
+        # load ground-truth message that was saved earlier during generation step
+        save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
+
+        # compute bitwise accuracy between predicted messages and saved messages
         pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
         msgs_bin = torch.round(torch.sigmoid(save_msgs.squeeze(1)))
         acc = (((pred_msgs_bin.eq(msgs_bin.data)).sum()) / num_bits).mean().item()
         bit_acc.append(acc)
 
+    # write bit accuracy summary to record file (append)
     msg = f"Bit Acc:{np.mean(bit_acc):.5f} \n"
     msg += "-" * 100 + "\n"
     print(msg)
@@ -244,26 +377,27 @@ def generate_tamper_mask(weight_path, tamper_image_path, save_path, num_bits=48,
         f.write(msg)
 
 
-
-
-
 if __name__ == "__main__":
+    # configuration / paths
     weight_path = "weights/clean"
-    src_image_path = "datasets/demo/t2i/"
-    save_path = "results/t2i"
+    src_image_path = "datasets/demo/coco/"
+    save_path = "results/coco"
     num_bits = 48
     size = 512
 
+    # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
     generate_watermark_image(weight_path=weight_path,
                              src_image_path=src_image_path,
                              save_path=save_path,
                              num_bits=num_bits, size=size)
-    
+
+    # 2) run detector over the saved tampered images to generate predicted masks and message predictions
     generate_tamper_mask(weight_path=weight_path,
                          tamper_image_path=f"{save_path}/tamper_images",
                          save_path=save_path,
                          num_bits=num_bits,
                          size=size)
 
+    # 3) Evaluate predicted masks against ground-truth masks saved in disk
     eva = Evalution(f"{save_path}/pred_mask", f"{save_path}/gt")
     eva.run(save_path)
