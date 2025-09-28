@@ -33,7 +33,7 @@ Download [COCO 2017](https://cocodataset.org/#download) dataset.
 
 The pretrained weights are available at **[Google Drive](https://drive.google.com/drive/folders/1bnkO0xzT2-ONWB2L2s1g7j7Y-z1iGwj8?usp=drive_link)**. \
 The full datasets are  available at 🤗🤗 **[HuggingFace](https://huggingface.co/datasets/Harxis/StableGuard-Tampering-dst)** 🤗🤗. \
-Download and put them in the project directory. \
+Download and put them in the project directory. 
 
 
 
