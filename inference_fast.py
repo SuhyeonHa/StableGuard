@@ -332,8 +332,8 @@ def pipeline_streaming(weight_path,
 # -------------------- Main entrypoint --------------------
 if __name__ == "__main__":
     weight_path = "weights/clean"
-    src_image_path = "datasets/demo/coco/"
-    save_path = "results/coco"
+    src_image_path = "/mnt/nas5/suhyeon/datasets/coco-2017/val2017"
+    save_path = "/mnt/nas5/suhyeon/projects/freq-loc/evaluation_results/stableguard"
     num_bits = 48
     size = 512
     batch_size = 8

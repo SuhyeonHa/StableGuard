@@ -153,3 +153,48 @@ def collate_fn(data):
             "random_masks": random_masks,
     }
 
+
+class AGEDataset(Dataset):
+    def __init__(self, data_root, mode="val", size=512) -> None:
+        super().__init__()
+        self.data_root = data_root
+        self.size = size
+        self.mode = mode
+        self.images_list = os.listdir(self.data_root)
+        self.images_list.sort()
+        self.transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5]),
+        ])
+        self.mask_transform = transforms.Compose([
+            transforms.ToTensor(),
+        ])
+
+        # temporary: process a single image 
+        if self.images_list:
+            self.images_list = self.images_list[:1]
+
+    def __getitem__(self, index):
+        image_name = self.images_list[index]
+        image = Image.open(os.path.join(self.data_root, image_name)).convert("RGB").resize((self.size, self.size))
+        mask = Image.open(os.path.join(self.data_root + "-Mask", image_name)).convert("L").resize((self.size, self.size))
+        image = self.transform(image)
+        mask = self.mask_transform(mask)
+
+        return {"image": image, 
+                "mask": mask,
+                "image_name": image_name}
+
+    def __len__(self):
+        return len(self.images_list)
+    
+def age_collate_fn(data):       
+    images = torch.stack([example["image"] for example in data])
+    masks = torch.stack([example["mask"] for example in data])
+    image_names = [example["image_name"] for example in data]
+
+    return {
+            "images": images,
+            "masks": masks,
+            "image_names": image_names
+    }

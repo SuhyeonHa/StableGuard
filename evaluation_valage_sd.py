@@ -7,17 +7,27 @@ from PIL import Image
 from torchvision.transforms import transforms as T
 from tqdm import tqdm
 import numpy as np
-from diffusers import AutoencoderKL
+from diffusers import AutoencoderKL, StableDiffusionInpaintPipeline
 import torch
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
-from torchvision.transforms import transforms
+from torchvision.transforms import transforms, ToTensor
 from piq import ssim, psnr, LPIPS
 
 from evaluation import PixelF1, PixelAUC, PixelIOU, PixelAccuracy
-from dataset import ImageDataset, image_collate_fn
+from dataset import age_collate_fn, AGEDataset
 import random
 from models import MultiplexingWatermarkVAEDecoder, MoEGuidedForensicNet
+
+def set_seed(seed: int = 42):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def denormalize_tensor(tensor, value_range=None, scale_each=True):
@@ -61,7 +71,7 @@ def denormalize_tensor(tensor, value_range=None, scale_each=True):
     return tensor
 
 
-class Evalution(object):
+class Evaluation(object):
     """
     Simple evaluation helper that reads predicted mask images from disk,
     compares them to ground-truth masks and accumulates pixel-level metrics.
@@ -147,7 +157,7 @@ class Evalution(object):
 
 
 @torch.no_grad()
-def generate_watermark_image(weight_path, src_image_path, save_path, num_bits=48, size=512):
+def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_name, num_bits=48, size=512):
     """
     Generate watermarked and tampered images from a source dataset using:
       - a pretrained diffusion VAE for reconstructing images (AutoencoderKL),
@@ -175,6 +185,9 @@ def generate_watermark_image(weight_path, src_image_path, save_path, num_bits=48
 
     # load pretrained diffusion VAE (encoder/decoder)
     original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suheyon/caches/')
+    pipe = StableDiffusionInpaintPipeline.from_pretrained(edit_model_name, cache_dir='/mnt/nas5/suhyeon/caches/')
+    generator = torch.Generator().manual_seed(42)
+
 
     # initialize and load weights for MultiplexingWatermarkVAEDecoder
     mpw_vae_decoder = MultiplexingWatermarkVAEDecoder(num_bits=num_bits)
@@ -188,12 +201,12 @@ def generate_watermark_image(weight_path, src_image_path, save_path, num_bits=48
     mpw_vae_decoder.eval()
 
     # prepare dataloader for validation images
-    val_dataset = ImageDataset(data_root=src_image_path, mode="val", size=size)
+    val_dataset = AGEDataset(data_root=src_image_path, mode="val", size=size)
     val_dataloader = DataLoader(
         val_dataset,
         shuffle=False,
-        collate_fn=image_collate_fn,
-        batch_size=8,
+        collate_fn=age_collate_fn,
+        batch_size=1,
         num_workers=4,
         drop_last=False,
     )
@@ -215,7 +228,7 @@ def generate_watermark_image(weight_path, src_image_path, save_path, num_bits=48
     for batch in tqdm(val_dataloader):
         # move batch tensors to GPU
         images = batch["images"].cuda()
-        generated_images = batch["generated_images"].cuda()
+        # generated_images = batch["generated_images"].cuda()
         masks = batch["masks"].cuda()
         image_names = batch["image_names"]
 
@@ -233,6 +246,12 @@ def generate_watermark_image(weight_path, src_image_path, save_path, num_bits=48
         # produce watermarked cover images from latents+msgs
         cover_images = mpw_vae_decoder(latents, msgs=msgs)
 
+        # inpaint
+        generated_images = pipe(prompt="", image=cover_images, mask_image=masks, generator=generator).images[0]
+
+        # pil to tensor, normalize to [-1,1], add batch dim
+        generated_images = ToTensor()(generated_images).cuda()
+        generated_images = (generated_images * 2.0 - 1.0).unsqueeze(0)
         # compose tampered images: replace regions indicated by mask with generated content
         tamper_images = masks * generated_images + (1 - masks) * cover_images
 
@@ -380,15 +399,18 @@ def generate_tamper_mask(weight_path, tamper_image_path, save_path, num_bits=48,
 if __name__ == "__main__":
     # configuration / paths
     weight_path = "weights/clean"
-    src_image_path = "/mnt/nas5/suhyeon/datasets/coco-2017/val2017"
-    save_path = "/mnt/nas5/suhyeon/projects/freq-loc/evaluation_results/stableguard"
+    src_image_path = "/mnt/nas5/suhyeon/datasets/valAGE-Set"
+    save_path = "/mnt/nas5/suhyeon/projects/eval_spliceless/stableguard/512_valAGE_sd_spliced"
+    edit_model_name = "sd-legacy/stable-diffusion-inpainting"
     num_bits = 48
     size = 512
 
+    set_seed(42)
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
     generate_watermark_image(weight_path=weight_path,
                              src_image_path=src_image_path,
                              save_path=save_path,
+                             edit_model_name=edit_model_name,
                              num_bits=num_bits, size=size)
 
     # 2) run detector over the saved tampered images to generate predicted masks and message predictions
@@ -399,5 +421,5 @@ if __name__ == "__main__":
                          size=size)
 
     # 3) Evaluate predicted masks against ground-truth masks saved in disk
-    eva = Evalution(f"{save_path}/pred_mask", f"{save_path}/gt")
+    eva = Evaluation(f"{save_path}/pred_mask", f"{save_path}/gt")
     eva.run(save_path)
