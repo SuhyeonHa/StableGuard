@@ -1,5 +1,6 @@
 # FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
-FROM pytorch/pytorch:2.3.1-cuda11.8-cudnn8-devel
+# FROM pytorch/pytorch:2.3.1-cuda11.8-cudnn8-devel
+FROM pytorch/pytorch:2.6.0-cuda11.8-cudnn9-devel
 
 ENV PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION "python"
 
