@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-eval-stableguard-spliced
+  name: suhyeon-eval-stableguard-spliceless
 spec:
   template:
     spec:
