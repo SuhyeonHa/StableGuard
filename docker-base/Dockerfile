@@ -29,4 +29,8 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get install -y \
 COPY requirements.txt requirements.txt
 RUN pip install -r requirements.txt
 
+WORKDIR /app
+COPY kubernetes/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 CMD [ "/bin/bash" ]
