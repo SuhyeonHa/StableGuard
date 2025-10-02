@@ -18,6 +18,7 @@ from evaluation import PixelF1, PixelAUC, PixelIOU, PixelAccuracy
 from dataset import age_collate_fn, AGEDataset
 import random
 from models import MultiplexingWatermarkVAEDecoder, MoEGuidedForensicNet
+import yaml
 
 def set_seed(seed: int = 42):
     random.seed(seed)
@@ -157,7 +158,7 @@ class Evaluation(object):
 
 
 @torch.no_grad()
-def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_name, num_bits=48, size=512):
+def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_name, is_spliced=False, num_bits=48, size=512):
     """
     Generate watermarked and tampered images from a source dataset using:
       - a pretrained diffusion VAE for reconstructing images (AutoencoderKL),
@@ -252,8 +253,12 @@ def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_
         # pil to tensor, normalize to [-1,1], add batch dim
         generated_images = ToTensor()(generated_images).cuda()
         generated_images = (generated_images * 2.0 - 1.0).unsqueeze(0)
+
         # compose tampered images: replace regions indicated by mask with generated content
-        tamper_images = masks * generated_images + (1 - masks) * cover_images
+        if is_spliced:
+            tamper_images = masks * generated_images + (1 - masks) * cover_images
+        else:
+            tamper_images = generated_images
 
         # compute image similarity metrics and append their values (per-image scalars)
         sd_real_psnr_list.append(
@@ -395,31 +400,60 @@ def generate_tamper_mask(weight_path, tamper_image_path, save_path, num_bits=48,
     with open(os.path.join(save_path, "record.txt"), "a+") as f:
         f.write(msg)
 
+def save_and_print_config(config, save_path):
+    """
+    Save and print the configuration dictionary to a YAML file.
+    """
+    os.makedirs(save_path, exist_ok=True)
+    
+    config_path = os.path.join(save_path, "config.yaml")
+
+    print("-" * 30)
+    print(" " * 10 + "Configuration")
+    print("-" * 30)
+    
+    print(yaml.dump(config, allow_unicode=True, default_flow_style=False))
+    
+    print("-" * 30)
+
+    with open(config_path, 'w') as f:
+        yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+        
+    print(f"Configuration saved to: {config_path}")
+    print("-" * 30)
+
 
 if __name__ == "__main__":
-    # configuration / paths
-    weight_path = "weights/clean"
-    src_image_path = "/mnt/nas5/suhyeon/datasets/valAGE-Set"
-    save_path = "/mnt/nas5/suhyeon/projects/eval_spliceless/stableguard/512_valAGE_sd_spliced"
-    edit_model_name = "sd-legacy/stable-diffusion-inpainting"
-    num_bits = 48
-    size = 512
+    # ------------------ Configuration ------------------
+    c = {
+        'weight_path': "/mnt/nas5/suhyeon/checkpoints/stableguard/weights/clean",
+        'src_image_path': "/mnt/nas5/suhyeon/datasets/valAGE-Set",
+        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/stableguard/512_valAGE_sd_spliceless",
+        'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
+        'num_bits': 48,
+        'size': 512,
+        'is_spliced': False,
+        'seed': 42
+    }
+    # ---------------------------------------------------
+    save_and_print_cfg = save_and_print_config(c, c['save_path'])
 
-    set_seed(42)
+    set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
-    generate_watermark_image(weight_path=weight_path,
-                             src_image_path=src_image_path,
-                             save_path=save_path,
-                             edit_model_name=edit_model_name,
-                             num_bits=num_bits, size=size)
+    generate_watermark_image(weight_path=c['weight_path'],
+                             src_image_path=c['src_image_path'],
+                             save_path=c['save_path'],
+                             edit_model_name=c['edit_model_name'],
+                             is_spliced=c['is_spliced'],
+                             num_bits=c['num_bits'], size=c['size'])
 
     # 2) run detector over the saved tampered images to generate predicted masks and message predictions
-    generate_tamper_mask(weight_path=weight_path,
-                         tamper_image_path=f"{save_path}/tamper_images",
-                         save_path=save_path,
-                         num_bits=num_bits,
-                         size=size)
+    generate_tamper_mask(weight_path=c['weight_path'],
+                         tamper_image_path=f"{c['save_path']}/tamper_images",
+                         save_path=c['save_path'],
+                         num_bits=c['num_bits'],
+                         size=c['size'])
 
     # 3) Evaluate predicted masks against ground-truth masks saved in disk
-    eva = Evaluation(f"{save_path}/pred_mask", f"{save_path}/gt")
-    eva.run(save_path)
+    eva = Evaluation(f"{c['save_path']}/pred_mask", f"{c['save_path']}/gt")
+    eva.run(c['save_path'])

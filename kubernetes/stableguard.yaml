@@ -1,0 +1,84 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: suhyeon-eval-stableguard-spliced
+spec:
+  template:
+    spec:
+      runtimeClassName: nvidia
+      # Uncomment this node Selector if you want to use a specific GPU type
+      nodeSelector:
+        nvidia.com/gpu.product: NVIDIA-GeForce-RTX-3090
+      
+      # Uncomment below if you want to use a specific node
+      nodeName: sgvr-gpu-013
+
+      # Uncomment below if you want to use a GPU device with memory > 15000
+      # affinity:
+      #   nodeAffinity:
+      #     requiredDuringSchedulingIgnoredDuringExecution:
+      #       nodeSelectorTerms:
+      #       - matchExpressions:
+      #         - key: nvidia.com/gpu.memory
+      #           operator: "Gt"
+      #           values:
+      #           - "15000"
+      
+      containers:
+      - name: main
+        image: sgvrcluster.kaist.ac.kr/suhyeon/stableguard:base
+        imagePullPolicy: Always
+        # requests: sum of pods' requests cannot exeed available resources in a node.
+        # limit: a container cannot use more than the limit.
+        resources:
+          limits:
+            cpu: 14 
+            memory: "64Gi"
+            # enter GPU count (e.g., 2)
+            nvidia.com/gpu: 1
+            # enter docker storage size (removed after pod's lifetime)
+            ephemeral-storage: 16G
+          requests:
+            cpu: 4
+            memory: "8Gi"
+            # enter GPU count (e.g., 2)
+            nvidia.com/gpu: 1
+            # enter docker storage size (removed after pod's lifetime)
+            ephemeral-storage: 16G
+        command: ["bash", "entrypoint.sh"]
+        # args:
+        #      the command above will execute "sh docker-entry/entry.sh" when the pod starts
+        # command: ["python", "train.py", "--model=nerf_gaussian", "--yaml=nerf_gaussian_llff", "--group=garf0115", "--name=room", "--data.dataset=llff", "--data.scene="room"", "--optim.sched=!"]
+        env:
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: TORCH_DISTRIBUTED_DEBUG
+          value: "DETAIL"
+        # - name: TORCH_HOME
+        #   value: "/mnt/nas5/suhyeon/torch_cache"
+        # set environment variable in a container
+        volumeMounts:
+        # mount volumes to a path
+        - mountPath: /mnt/nas5
+          name: sgvr-nas5
+        # SSD mount example:
+        # - mountPath: /mnt/ssd1
+        #   name: sgvr-ssd1
+        - mountPath: /dev/shm
+          name: dshm # to prevent insufficient shared memory error
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: regcred
+      volumes:
+      # define volumes used by containers
+      - name: sgvr-nas5
+        persistentVolumeClaim:
+          claimName: sgvr-nas-005-pvc
+      # SSD mount example:
+      # - name: sgvr-ssd1
+      #   persistentVolumeClaim:
+      #     claimName: sgvr-gpu-011-ssd1-pvc
+      - name: dshm  # to prevent insufficient shared memory error
+        emptyDir:
+          medium: Memory
+          sizeLimit: "64Gi"

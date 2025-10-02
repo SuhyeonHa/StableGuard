@@ -171,8 +171,8 @@ class AGEDataset(Dataset):
         ])
 
         # temporary: process a single image 
-        if self.images_list:
-            self.images_list = self.images_list[:1]
+        # if self.images_list:
+        #     self.images_list = self.images_list[:5]
 
     def __getitem__(self, index):
         image_name = self.images_list[index]
