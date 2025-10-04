@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-eval-stableguard
+  name: suhyeon-eval-wam
 spec:
   template:
     spec:
@@ -11,7 +11,7 @@ spec:
         nvidia.com/gpu.product: NVIDIA-GeForce-RTX-3090
       
       # Uncomment below if you want to use a specific node
-      nodeName: sgvr-gpu-015
+      nodeName: sgvr-gpu-021
 
       # Uncomment below if you want to use a GPU device with memory > 15000
       # affinity:

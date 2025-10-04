@@ -400,13 +400,14 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
     for image_path in tqdm(image_paths):
         # load and resize image to expected input size
         image = Image.open(os.path.join(tamper_image_path, image_path)).resize((size, size))
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Lambda(lambda x: x * 2 - 1),  # map [0,1] -> [-1,1] if model expects that
-        ])
-        image = transform(image).unsqueeze(0)  # shape [1, C, H, W]
 
         if target_model == "stableguard":
+            transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Lambda(lambda x: x * 2 - 1),  # map [0,1] -> [-1,1] if model expects that
+            ])
+            image = transform(image).unsqueeze(0)  # shape [1, C, H, W]
+
             # run detector on GPU
             pred_msgs, pred_mask = moe_gfn(image.cuda())
 
@@ -414,6 +415,10 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             pred_mask = torch.sigmoid(pred_mask)
 
         elif target_model == "wam":
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+            ])
+            image = transform(image).unsqueeze(0)  # shape [1, C, H, W]
             image_down = F.interpolate(image, size=(256, 256), mode="bilinear", align_corners=False)
             outputs = wam.detect(image_down)["preds"]
             pred_mask = F.sigmoid(outputs[:, 0, :, :]).unsqueeze(0)

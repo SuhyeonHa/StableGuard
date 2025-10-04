@@ -5,7 +5,7 @@ weight_paths:
 
 normalization:
   omniguard: "none"
-  wam: "imagenet"
+  wam: "rescale"
   stableguard: "rescale"
 
 defaults:
