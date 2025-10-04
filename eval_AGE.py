@@ -215,7 +215,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
     elif target_model == "omniguard":
         net = Model(checkpoint=weight_path).cuda().eval()
         init_model(net)
-        state_dicts = torch.load(os.path.join(weight_path, "model_checkpoint_01500.pt"), weights_only=False)
+        state_dicts = torch.load(os.path.join(weight_path, "model_checkpoint_01500.pt"), map_location="cpu", weights_only=False)
         network_state_dict = {k.removeprefix('module.'):v for k,v in state_dicts['net'].items()}
         net.load_state_dict(network_state_dict)
 
