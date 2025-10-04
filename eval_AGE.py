@@ -278,6 +278,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
         
         elif target_model == "omniguard":
+            decode_images = torch.zeros_like(images)
             dwt = DWT()
             image = Image.open("./omniguard/bluesky_white2.png").convert("RGB").resize((size, size))
             result = np.array(image) / 255.
