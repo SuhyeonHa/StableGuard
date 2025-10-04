@@ -1,0 +1,18 @@
+weight_paths:
+  omniguard: "/mnt/nas5/suhyeon/checkpoints/"
+  wam: "/mnt/nas5/suhyeon/checkpoints/wam/"
+  stableguard: "/mnt/nas5/suhyeon/checkpoints/stableguard/weights/clean"
+
+normalization:
+  omniguard: "none"
+  wam: "imagenet"
+  stableguard: "rescale"
+
+defaults:
+  src_image_path: "/mnt/nas5/suhyeon/datasets/valAGE-Set"
+  edit_model_name: "sd-legacy/stable-diffusion-inpainting"
+  num_bits: 48
+  seed: 42
+  size: 512
+  target_model: "wam" # ["omniguard", "wam", "stableguard]
+  save_path: "/mnt/nas5/suhyeon/projects/eval_spliceless/wam/512_valAGE_sd"

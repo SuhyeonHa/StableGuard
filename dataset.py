@@ -155,19 +155,25 @@ def collate_fn(data):
 
 
 class AGEDataset(Dataset):
-    def __init__(self, data_root, mode="val", size=512) -> None:
+    def __init__(self, data_root, norm_type="imagenet", mode="val", size=512) -> None:
         super().__init__()
         self.data_root = data_root
         self.size = size
         self.mode = mode
         self.images_list = os.listdir(self.data_root)
         self.images_list.sort()
-        self.transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
-        ])
         self.mask_transform = transforms.Compose([
             transforms.ToTensor(),
+        ])
+        if norm_type == "imagenet":
+            self.transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ])
+        elif norm_type == "rescale": # [0, 1] -> [-1, 1]
+            self.transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize([0.5], [0.5]),
         ])
 
         # temporary: process a single image 
