@@ -15,9 +15,9 @@ export GITHUB_TOKEN=$(cat "$TOKEN_FILE")
 
 GIT_REPO_URL="https://${GITHUB_TOKEN}@github.com/SuhyeonHa/${GIT_REPO}.git"
 
-mkdir -p /workspace
-git clone --branch "${GIT_BRANCH}" "${GIT_REPO_URL}" /workspace/
-cd /workspace
+rm -rf "${GIT_REPO}"
+git clone --branch "${GIT_BRANCH}" "${GIT_REPO_URL}"
+cd "${GIT_REPO}"
 echo "Clone complete."
 
 python eval_AGE.py
