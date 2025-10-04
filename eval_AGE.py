@@ -288,9 +288,9 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
             cover_input = dwt((images + 1.0) / 2.0) # [-1, 1] to [0, 1]
             secret_input = dwt(secret)
-            message = torch.randint(2, (1, 64)).to(torch.float32).cuda()
+            msgs = torch.randint(2, (1, 64)).to(torch.float32).cuda()
 
-            cover_images, output_z, out_temp, secret_temp = net(cover_input, secret_input, message)
+            cover_images, output_z, out_temp, secret_temp = net(cover_input, secret_input, msgs)
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
 
         # inpaint
