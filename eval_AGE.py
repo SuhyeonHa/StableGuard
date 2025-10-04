@@ -1,5 +1,7 @@
 import os
 import warnings
+
+from watermark_anything.modules import common
 # Suppress warnings for cleaner output
 warnings.filterwarnings("ignore")
 
@@ -22,6 +24,8 @@ import yaml
 import torch.nn.functional as F
 
 from watermark_anything.wam_utils import load_model_from_checkpoint
+from omniguard.model_invert import Model, init_model
+from omniguard.modules.Unet_common import DWT, IWT
 
 def set_seed(seed: int = 42):
     random.seed(seed)
@@ -34,7 +38,7 @@ def set_seed(seed: int = 42):
     torch.backends.cudnn.benchmark = False
 
 
-def denormalize_tensor(tensor, value_range=None, scale_each=True):
+def denormalize_tensor(tensor, mode='minmax', value_range=None, scale_each=True):
     """
     Normalize tensor values into [0,1] (in-place style but returns a cloned tensor).
     This helper is used before feeding images to image-quality metrics such as PSNR/SSIM/LPIPS.
@@ -161,7 +165,7 @@ class Evaluation(object):
 
 
 @torch.no_grad()
-def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, num_bits=48, size=512):
+def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, model_img_size=512, num_bits=48, size=512):
     """
     Generate watermarked and tampered images from a source dataset using:
       - a pretrained diffusion VAE for reconstructing images (AutoencoderKL),
@@ -207,6 +211,13 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
     elif target_model == "wam":
         wam = load_model_from_checkpoint(weight_path, num_bits).cuda().eval()
+
+    elif target_model == "omniguard":
+        net = Model(checkpoint=weight_path).cuda().eval()
+        init_model(net)
+        state_dicts = torch.load(os.path.join(weight_path, "model_checkpoint_01500.pt"), weights_only=False)
+        network_state_dict = {k.removeprefix('module.'):v for k,v in state_dicts['net'].items()}
+        net.load_state_dict(network_state_dict)
 
     # prepare dataloader for validation images
     val_dataset = AGEDataset(data_root=src_image_path, norm_type=norm, mode="val", size=size)
@@ -265,6 +276,21 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             cover_images = F.interpolate(cover_images, size=(size, size), mode="bilinear", align_corners=False)
             cover_images = denormalize_tensor(cover_images, scale_each=True) # [0, 1]
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
+        
+        elif target_model == "omniguard":
+            dwt = DWT()
+            image = Image.open("./omniguard/bluesky_white2.png").convert("RGB").resize((size, size))
+            result = np.array(image) / 255.
+            expanded_matrix = np.expand_dims(result, axis=0) 
+            secret = torch.from_numpy(np.ascontiguousarray(expanded_matrix)).float()
+            secret = secret.permute(0, 3, 1, 2).cuda()
+
+            cover_input = dwt((images + 1.0) / 2.0) # [-1, 1] to [0, 1]
+            secret_input = dwt(secret)
+            message = torch.randint(2, (1, 64)).to(torch.float32).cuda()
+
+            cover_images, output_z, out_temp, secret_temp = net(cover_input, secret_input, message)
+            cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
 
         # inpaint
         generated_images = pipe(prompt="", image=cover_images, mask_image=masks, generator=generator).images[0]
@@ -275,7 +301,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
         # spliced images: replace regions indicated by mask with generated content
         # spliceless images: just the generated image without splicing
-        spliced_images = masks * generated_images + (1 - masks) * cover_images
+        spliced_images = masks * generated_images + (1 - masks) * cover_images # operation in [-1, 1]
         spliceless_images = generated_images
 
         # compute image similarity metrics and append their values (per-image scalars)
@@ -391,6 +417,12 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
         moe_gfn.eval()
     elif target_model == "wam":
         wam = load_model_from_checkpoint(weight_path, num_bits).cuda().eval()
+    elif target_model == "omniguard":
+        net = Model(checkpoint=weight_path).cuda().eval()
+        init_model(net)
+        state_dicts = torch.load(os.path.join(weight_path, "model_checkpoint_01500.pt"), weights_only=False)
+        network_state_dict = {k.removeprefix('module.'):v for k,v in state_dicts['net'].items()}
+        net.load_state_dict(network_state_dict)
 
     bit_acc = []
     image_paths = os.listdir(tamper_image_path)
@@ -403,8 +435,8 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
 
         if target_model == "stableguard":
             transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Lambda(lambda x: x * 2 - 1),  # map [0,1] -> [-1,1] if model expects that
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: x * 2 - 1),  # map [0,1] -> [-1,1] if model expects that
             ])
             image = transform(image).unsqueeze(0)  # shape [1, C, H, W]
 
@@ -424,6 +456,20 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             pred_mask = F.sigmoid(outputs[:, 0, :, :]).unsqueeze(0)
             pred_mask = F.interpolate(pred_mask, size=(size, size), mode="bilinear", align_corners=False)
         
+        elif target_model == "omniguard":
+            dwt = DWT()
+            iwt = IWT()
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: x * 2 - 1),
+            ])
+            image = transform(image).unsqueeze(0)  # shape [1, C, H, W]
+            image_down = F.interpolate(image, size=(256, 256), mode="bilinear", align_corners=False)
+            output_steg = dwt(image_down)
+            output_image, bits = net(output_steg.cuda(), rev=True)
+            secret_rev = output_image.narrow(1, 0, 12)
+            secret_rev = iwt(secret_rev)
+
         # save predicted mask image to disk
         save_image(pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
 
@@ -472,8 +518,8 @@ if __name__ == "__main__":
     # ------------------ Configuration ------------------
     run_config = {
         'src_image_path': "/mnt/nas5/suhyeon/datasets/valAGE-Set",
-        'target_model': "wam", # ["omniguard", "wam", "stableguard"]
-        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/wam/512_valAGE_sd",
+        'target_model': "omniguard", # ["omniguard", "wam", "stableguard"]
+        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/512_valAGE_sd",
         'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
         'num_bits': 48,
         'size': 512,
@@ -495,7 +541,8 @@ if __name__ == "__main__":
                              src_image_path=c['src_image_path'],
                              save_path=c['save_path'],
                              edit_model_name=c['edit_model_name'],
-                             num_bits=c['num_bits'], size=c['size'])
+                             num_bits=c['num_bits'],
+                             size=c['size'])
 
     # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     eval_setting = ["spliced", "spliceless"]
