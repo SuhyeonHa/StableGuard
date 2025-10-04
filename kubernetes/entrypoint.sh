@@ -8,7 +8,7 @@ set -e
 
 # copy workspace from private git repo
 GIT_REPO="StableGuard"
-GIT_BRANCH="exp/evaluation_wam"
+GIT_BRANCH="exp/evaluation_omniguard"
 TOKEN_FILE="/mnt/nas5/suhyeon/tokens/github_token.txt"
 
 export GITHUB_TOKEN=$(cat "$TOKEN_FILE")
