@@ -158,7 +158,7 @@ class Evaluation(object):
 
 
 @torch.no_grad()
-def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_name, is_spliced=False, num_bits=48, size=512):
+def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_name, num_bits=48, size=512):
     """
     Generate watermarked and tampered images from a source dataset using:
       - a pretrained diffusion VAE for reconstructing images (AutoencoderKL),
@@ -180,7 +180,7 @@ def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_
         size (int): image size used by the dataset (ImageDataset will resize).
     """
     # create output subdirectories
-    res = ['cover_images', 'tamper_images', 'gt', 'msgs']
+    res = ['cover_images', 'spliced_images', 'spliceless_images', 'gt', 'msgs']
     for n in res:
         os.makedirs(os.path.join(save_path, '%s' % n), exist_ok=True)
 
@@ -254,11 +254,10 @@ def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_
         generated_images = ToTensor()(generated_images).cuda()
         generated_images = (generated_images * 2.0 - 1.0).unsqueeze(0)
 
-        # compose tampered images: replace regions indicated by mask with generated content
-        if is_spliced:
-            tamper_images = masks * generated_images + (1 - masks) * cover_images
-        else:
-            tamper_images = generated_images
+        # spliced images: replace regions indicated by mask with generated content
+        # spliceless images: just the generated image without splicing
+        spliced_images = masks * generated_images + (1 - masks) * cover_images
+        spliceless_images = generated_images
 
         # compute image similarity metrics and append their values (per-image scalars)
         sd_real_psnr_list.append(
@@ -295,13 +294,15 @@ def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_
         for i in range(images.size(0)):
             save_file_name = image_names[i]
             cover_image = cover_images[i]
-            tamper_image = tamper_images[i]
+            spliced_image = spliced_images[i]
+            spliceless_image = spliceless_images[i]
             mask = masks[i]
             msg = msgs[i]
 
             # make each a single-image tensor and convert to uint8 PIL before saving
             cover_image = cover_image.unsqueeze(0)
-            tamper_image = tamper_image.unsqueeze(0)
+            spliced_image = spliced_image.unsqueeze(0)
+            spliceless_image = spliceless_image.unsqueeze(0)
             mask = mask.unsqueeze(0)
             msg = msg.unsqueeze(0)
 
@@ -311,15 +312,22 @@ def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_
             cover_image = (cover_image * 255).astype(np.uint8)
             cover_image_pil = Image.fromarray(cover_image)
 
-            # tamper image: same conversion
-            tamper_image = (tamper_image / 2 + 0.5).clamp(0, 1)
-            tamper_image = tamper_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
-            tamper_image = (tamper_image * 255).astype(np.uint8)
-            tamper_image_pil = Image.fromarray(tamper_image)
+            # spliced image: same conversion
+            spliced_image = (spliced_image / 2 + 0.5).clamp(0, 1)
+            spliced_image = spliced_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+            spliced_image = (spliced_image * 255).astype(np.uint8)
+            spliced_image_pil = Image.fromarray(spliced_image)
 
-            # save cover and tamper images as PNG (replace .jpg extension if present)
+            # spliceless image: same conversion
+            spliceless_image = (spliceless_image / 2 + 0.5).clamp(0, 1)
+            spliceless_image = spliceless_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+            spliceless_image = (spliceless_image * 255).astype(np.uint8)
+            spliceless_image_pil = Image.fromarray(spliceless_image)
+
+            # save cover and edited images as PNG (replace .jpg extension if present)
             cover_image_pil.save(os.path.join(save_path, 'cover_images', save_file_name.replace("jpg", "png")))
-            tamper_image_pil.save(os.path.join(save_path, 'tamper_images', save_file_name.replace("jpg", "png")))
+            spliced_image_pil.save(os.path.join(save_path, 'spliced_images', save_file_name.replace("jpg", "png")))
+            spliceless_image_pil.save(os.path.join(save_path, 'spliceless_images', save_file_name.replace("jpg", "png")))
 
             # save ground-truth mask as image tensor and message vector as .pt file
             save_image(mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
@@ -342,7 +350,7 @@ def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_
 
 
 @torch.no_grad()
-def generate_tamper_mask(weight_path, tamper_image_path, save_path, num_bits=48, size=512):
+def generate_tamper_mask(weight_path, eval_setting, save_path, num_bits=48, size=512):
     """
     Use the trained forensic network (MoEGuidedForensicNet) to predict:
       - the embedded messages for each tampered image
@@ -352,7 +360,8 @@ def generate_tamper_mask(weight_path, tamper_image_path, save_path, num_bits=48,
     runs the detector, saves predicted masks to disk and computes bit accuracy.
     """
     # make output folder for predicted masks
-    os.makedirs(os.path.join(save_path, "pred_mask"), exist_ok=True)
+    os.makedirs(os.path.join(save_path, f"pred_mask_{eval_setting}"), exist_ok=True)
+    tamper_image_path = os.path.join(save_path, f"{eval_setting}_images")
 
     # initialize and load the detector model
     moe_gfn = MoEGuidedForensicNet(num_bits=num_bits)
@@ -382,7 +391,7 @@ def generate_tamper_mask(weight_path, tamper_image_path, save_path, num_bits=48,
         pred_mask = torch.sigmoid(pred_mask)
 
         # save predicted mask image to disk
-        save_image(pred_mask, os.path.join(save_path, 'pred_mask', image_path), normalize=False, scale_each=True)
+        save_image(pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
 
         # load ground-truth message that was saved earlier during generation step
         save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
@@ -397,7 +406,7 @@ def generate_tamper_mask(weight_path, tamper_image_path, save_path, num_bits=48,
     msg = f"Bit Acc:{np.mean(bit_acc):.5f} \n"
     msg += "-" * 100 + "\n"
     print(msg)
-    with open(os.path.join(save_path, "record.txt"), "a+") as f:
+    with open(os.path.join(f"pred_mask_{eval_setting}", "record.txt"), "a+") as f:
         f.write(msg)
 
 def save_and_print_config(config, save_path):
@@ -428,11 +437,10 @@ if __name__ == "__main__":
     c = {
         'weight_path': "/mnt/nas5/suhyeon/checkpoints/stableguard/weights/clean",
         'src_image_path': "/mnt/nas5/suhyeon/datasets/valAGE-Set",
-        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/stableguard/512_valAGE_sd_spliceless",
+        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/stableguard/512_valAGE_sd",
         'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
         'num_bits': 48,
         'size': 512,
-        'is_spliced': False,
         'seed': 42
     }
     # ---------------------------------------------------
@@ -444,16 +452,16 @@ if __name__ == "__main__":
                              src_image_path=c['src_image_path'],
                              save_path=c['save_path'],
                              edit_model_name=c['edit_model_name'],
-                             is_spliced=c['is_spliced'],
                              num_bits=c['num_bits'], size=c['size'])
 
-    # 2) run detector over the saved tampered images to generate predicted masks and message predictions
-    generate_tamper_mask(weight_path=c['weight_path'],
-                         tamper_image_path=f"{c['save_path']}/tamper_images",
-                         save_path=c['save_path'],
-                         num_bits=c['num_bits'],
-                         size=c['size'])
-
-    # 3) Evaluate predicted masks against ground-truth masks saved in disk
-    eva = Evaluation(f"{c['save_path']}/pred_mask", f"{c['save_path']}/gt")
-    eva.run(c['save_path'])
+    # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
+    eval_setting = ["spliced", "spliceless"]
+    for setting in eval_setting:
+        generate_tamper_mask(weight_path=c['weight_path'],
+                            eval_setting=setting,
+                            save_path=c['save_path'],
+                            num_bits=c['num_bits'],
+                            size=c['size'])
+        # 3) Evaluate predicted masks against ground-truth masks saved in disk
+        eva = Evaluation(f"{c['save_path']}/pred_mask_{setting}", f"{c['save_path']}/gt")
+        eva.run(f"{c['save_path']}/pred_mask_{setting}")
