@@ -45,7 +45,7 @@ spec:
             nvidia.com/gpu: 1
             # enter docker storage size (removed after pod's lifetime)
             ephemeral-storage: 16G
-        command: ["bash", "entrypoint.sh"]
+        command: ["/app/entrypoint.sh"]
         # args:
         #      the command above will execute "sh docker-entry/entry.sh" when the pod starts
         # command: ["python", "train.py", "--model=nerf_gaussian", "--yaml=nerf_gaussian_llff", "--group=garf0115", "--name=room", "--data.dataset=llff", "--data.scene="room"", "--optim.sched=!"]
