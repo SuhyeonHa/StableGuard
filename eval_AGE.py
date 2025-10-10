@@ -217,7 +217,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
     elif target_model == "omniguard":
         net = Model(checkpoint=weight_path).cuda().eval()
         init_model(net)
-        state_dicts = torch.load(os.path.join(weight_path, "model_checkpoint_01500.pt"), weights_only=False)
+        state_dicts = torch.load(os.path.join(weight_path, "model_checkpoint_01500.pt"), map_location="cpu", weights_only=False)
         network_state_dict = {k.removeprefix('module.'):v for k,v in state_dicts['net'].items()}
         net.load_state_dict(network_state_dict)
 
@@ -280,6 +280,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
         
         elif target_model == "omniguard":
+            decode_images = torch.zeros_like(images)
             dwt = DWT()
             image = Image.open("./omniguard/bluesky_white2.png").convert("RGB").resize((size, size))
             result = np.array(image) / 255.
@@ -289,9 +290,9 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
             cover_input = dwt((images + 1.0) / 2.0) # [-1, 1] to [0, 1]
             secret_input = dwt(secret)
-            message = torch.randint(2, (1, 64)).to(torch.float32).cuda()
+            msgs = torch.randint(2, (1, 64)).to(torch.float32).cuda()
 
-            cover_images, output_z, out_temp, secret_temp = net(cover_input, secret_input, message)
+            cover_images, output_z, out_temp, secret_temp = net(cover_input, secret_input, msgs)
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
 
         # inpaint
@@ -422,7 +423,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
     elif target_model == "omniguard":
         net = Model(checkpoint=weight_path).cuda().eval()
         init_model(net)
-        state_dicts = torch.load(os.path.join(weight_path, "model_checkpoint_01500.pt"), weights_only=False)
+        state_dicts = torch.load(os.path.join(weight_path, "model_checkpoint_01500.pt"), map_location="cpu", weights_only=False)
         network_state_dict = {k.removeprefix('module.'):v for k,v in state_dicts['net'].items()}
         net.load_state_dict(network_state_dict)
         
