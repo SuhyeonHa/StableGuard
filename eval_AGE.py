@@ -472,11 +472,19 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             ])
             image = transform(image).unsqueeze(0)  # shape [1, C, H, W]
             image_down = F.interpolate(image, size=(256, 256), mode="bilinear", align_corners=False)
+
             outputs = wam.detect(image_down)["preds"]
             pred_mask = F.sigmoid(outputs[:, 0, :, :]).unsqueeze(0) # [1, 1, 256, 256]
             pred_bit = outputs[:, 1:, :, :] # [1, 32, 256, 256]
-
+            pred_message = msg_predict_inference(pred_bit, pred_mask).cpu().float()  # [1, 32]
+            
             pred_mask = F.interpolate(pred_mask, size=(size, size), mode="bilinear", align_corners=False)
+            save_image(pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
+
+            # load ground-truth message that was saved earlier during generation step
+            save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
+            acc = (pred_message == save_msgs).float().mean().item()
+            bit_acc.append(acc)
         
         elif target_model == "omniguard":
             dwt = DWT()
