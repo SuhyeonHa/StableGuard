@@ -171,7 +171,16 @@ class Model(nn.Module):
             out = iwt(output_steg)
             out_temp = out
             
-            out = self.encode(self.bm, out.to(device), watermarkID)
+            # added to match with model bit length
+            model_bit_length = 100
+
+            watermark_list = []
+            for msg_str in watermarkID:
+                msg_padded = msg_str.ljust(model_bit_length, '0')
+                msg_tensor = torch.tensor([int(bit) for bit in msg_padded], dtype=torch.float32)
+                watermark_list.append(msg_tensor)
+            watermarks = torch.stack(watermark_list, dim=0).to(device)
+            out = self.encode(self.bm, out.to(device), watermarks)
 
             return out, output_z, out_temp, secret_temp
 
