@@ -479,7 +479,8 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             pred_message = msg_predict_inference(pred_bit, pred_mask).cpu().float()  # [1, 32]
             
             pred_mask = F.interpolate(pred_mask, size=(size, size), mode="bilinear", align_corners=False)
-            save_image(pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
+            # WAM predicts the non-tampered region, so invert the mask
+            save_image(1-pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
 
             # load ground-truth message that was saved earlier during generation step
             save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
