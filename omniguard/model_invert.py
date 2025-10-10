@@ -174,12 +174,8 @@ class Model(nn.Module):
             # added to match with model bit length
             model_bit_length = 100
 
-            watermark_list = []
-            for msg_str in watermarkID:
-                msg_padded = msg_str.ljust(model_bit_length, '0')
-                msg_tensor = torch.tensor([int(bit) for bit in msg_padded], dtype=torch.float32)
-                watermark_list.append(msg_tensor)
-            watermarks = torch.stack(watermark_list, dim=0).to(device)
+            padding_needed = model_bit_length - watermarkID.shape[1]
+            watermarks = F.pad(watermarkID, (0, padding_needed), "constant", 0)
             out = self.encode(self.bm, out.to(device), watermarks)
 
             return out, output_z, out_temp, secret_temp
