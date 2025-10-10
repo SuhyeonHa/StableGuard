@@ -412,6 +412,8 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
     os.makedirs(os.path.join(save_path, f"pred_mask_{eval_setting}"), exist_ok=True)
     tamper_image_path = os.path.join(save_path, f"{eval_setting}_images")
 
+    valid_exts = (".jpg", ".jpeg", ".png")
+
     # initialize and load the detector model
     if target_model == "stableguard":
         moe_gfn = MoEGuidedForensicNet(num_bits=num_bits)
@@ -433,7 +435,8 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
         extractor = extractor.cuda().eval()
 
     bit_acc = []
-    image_paths = os.listdir(tamper_image_path)
+    file_paths = os.listdir(tamper_image_path)
+    image_paths = [f for f in file_paths if f.lower().endswith(valid_exts)]
     image_paths.sort()
 
     # iterate files and run inference on each image (single-image inference)
@@ -469,6 +472,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
         elif target_model == "wam":
             transform = transforms.Compose([
                 transforms.ToTensor(),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
             ])
             image = transform(image).unsqueeze(0).cuda()  # shape [1, C, H, W]
             image_down = F.interpolate(image, size=(256, 256), mode="bilinear", align_corners=False)
