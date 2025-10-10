@@ -160,7 +160,7 @@ class AGEDataset(Dataset):
         self.data_root = data_root
         self.size = size
         self.mode = mode
-        valid_exts = [".jpg", ".jpeg", ".png"]
+        valid_exts = (".jpg", ".jpeg", ".png")
         file_list = os.listdir(self.data_root)
         self.images_list = [f for f in file_list if f.lower().endswith(valid_exts)]
         self.images_list.sort()
