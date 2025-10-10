@@ -171,7 +171,7 @@ class Model(nn.Module):
             out = iwt(output_steg)
             out_temp = out
             
-            # out = self.encode(self.bm, out.to(device), watermarkID)
+            out = self.encode(self.bm, out.to(device), watermarkID)
 
             return out, output_z, out_temp, secret_temp
 
@@ -184,13 +184,13 @@ class Model(nn.Module):
             input_tmp = torch.cat((out_tmp, x), 1)
             res = self.invert(input_tmp)
 
-            # out_freq = x.narrow(1, 0, 4 * 3)
-            # img = iwt(out_freq)
-            # img = img.to(device)
+            out_freq = x.narrow(1, 0, 4 * 3)
+            img = iwt(out_freq)
+            img = img.to(device)
             
-            # extracted_bits = self.bm.decoder(img * 2 - 1)
-            
-            return res
+            extracted_bits = self.bm.decoder(img * 2 - 1)
+
+            return res, extracted_bits
 
 
 def init_model(mod):

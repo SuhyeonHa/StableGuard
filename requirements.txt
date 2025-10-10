@@ -71,3 +71,5 @@ zipp==3.23.0
 transformers==4.56.2
 kornia
 timm
+albumentationsx
+fvcore

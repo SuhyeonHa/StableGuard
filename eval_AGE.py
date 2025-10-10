@@ -22,10 +22,12 @@ import random
 from models import MultiplexingWatermarkVAEDecoder, MoEGuidedForensicNet
 import yaml
 import torch.nn.functional as F
-
+import albumentations as albu
 from watermark_anything.wam_utils import load_model_from_checkpoint
 from omniguard.model_invert import Model, init_model
 from omniguard.modules.Unet_common import DWT, IWT
+from omniguard.iml_vit_model import iml_vit_model
+from albumentations.pytorch import ToTensorV2
 
 def set_seed(seed: int = 42):
     random.seed(seed)
@@ -423,6 +425,10 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
         state_dicts = torch.load(os.path.join(weight_path, "model_checkpoint_01500.pt"), weights_only=False)
         network_state_dict = {k.removeprefix('module.'):v for k,v in state_dicts['net'].items()}
         net.load_state_dict(network_state_dict)
+        
+        extractor = iml_vit_model()
+        extractor.load_state_dict(torch.load(os.path.join(weight_path, "checkpoint-175.pth"), weights_only=False)['model'], strict=True)
+        extractor = extractor.cuda().eval()
 
     bit_acc = []
     image_paths = os.listdir(tamper_image_path)
@@ -446,6 +452,18 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             # convert mask logits to probabilities
             pred_mask = torch.sigmoid(pred_mask)
 
+            # save predicted mask image to disk
+            save_image(pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
+
+            # load ground-truth message that was saved earlier during generation step
+            save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
+
+            # compute bitwise accuracy between predicted messages and saved messages
+            pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
+            msgs_bin = torch.round(torch.sigmoid(save_msgs.squeeze(1)))
+            acc = (((pred_msgs_bin.eq(msgs_bin.data)).sum()) / num_bits).mean().item()
+            bit_acc.append(acc)
+
         elif target_model == "wam":
             transform = transforms.Compose([
                 transforms.ToTensor(),
@@ -463,25 +481,55 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
                 transforms.ToTensor(),
                 transforms.Lambda(lambda x: x * 2 - 1),
             ])
+            transform_extractor = albu.Compose([
+                albu.PadIfNeeded(          
+                    min_height=1024,
+                    min_width=1024, 
+                    border_mode=0, 
+                    value=0, 
+                    position='top_left',
+                    mask_value=0),
+                albu.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                albu.Crop(0, 0, 1024, 1024),
+                ToTensorV2()
+            ])
             image = transform(image).unsqueeze(0)  # shape [1, C, H, W]
-            image_down = F.interpolate(image, size=(256, 256), mode="bilinear", align_corners=False)
-            output_steg = dwt(image_down)
+            output_steg = dwt(image)
             output_image, bits = net(output_steg.cuda(), rev=True)
             secret_rev = output_image.narrow(1, 0, 12)
             secret_rev = iwt(secret_rev)
 
-        # save predicted mask image to disk
-        save_image(pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
+            artifact = secret_rev.permute(0, 2, 3, 1).squeeze().cpu().numpy() * 255
+            fuse = image.permute(0, 2, 3, 1).squeeze().cpu().numpy() * 255
 
-        # load ground-truth message that was saved earlier during generation step
-        save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
+            artifact = transform_extractor(image=artifact)['image'].cuda().unsqueeze(0)
+            fuse = transform_extractor(image=fuse)['image'].cuda().unsqueeze(0)
 
-        # compute bitwise accuracy between predicted messages and saved messages
-        pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
-        msgs_bin = torch.round(torch.sigmoid(save_msgs.squeeze(1)))
-        acc = (((pred_msgs_bin.eq(msgs_bin.data)).sum()) / num_bits).mean().item()
-        bit_acc.append(acc)
+            pred_mask = extractor(artifact, fuse)
+            b, _, W, H = image.shape
+            pred_mask = pred_mask[:, :, 0:W, 0:H]
 
+            # save predicted mask image to disk
+            save_image(pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
+
+            # load ground-truth message that was saved earlier during generation step
+            save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
+
+            # compute bitwise accuracy between predicted messages and saved messages
+            pred_msgs_bin = (bits > 0).int()
+            msgs_bin = (save_msgs > 0).int()
+            pred_string = ''.join(str(x.item()) for x in pred_msgs_bin.flatten())
+            msgs_string = ''.join(str(x.item()) for x in msgs_bin.flatten())
+            if len(pred_string) > len(msgs_string):
+                pred_string = pred_string[:len(msgs_string)]
+
+            correct_bits = sum(1 for a, b in zip(pred_string, msgs_string) if a == b)
+    
+            total_bits = len(msgs_string)
+            acc = correct_bits / total_bits
+            
+            bit_acc.append(acc)
+            
     # write bit accuracy summary to record file (append)
     msg = f"Bit Acc:{np.mean(bit_acc):.5f} \n"
     msg += "-" * 100 + "\n"
@@ -531,10 +579,10 @@ if __name__ == "__main__":
     c.update(run_config)
     c['weight_path'] = default_config['weight_paths'][c['target_model']]
     c['normalization'] = default_config['normalization'][c['target_model']]
-    save_and_print_cfg = save_and_print_config(c, c['save_path'])
 
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
+    save_and_print_cfg = save_and_print_config(c, c['save_path'])
     generate_watermark_image(norm=c['normalization'],
                              weight_path=c['weight_path'],
                              target_model=c['target_model'],
