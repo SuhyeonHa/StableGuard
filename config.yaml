@@ -10,7 +10,7 @@ normalization:
 
 num_bits:
   omniguard: 64
-  wam: 48
+  wam: 32
   stableguard: 48
 
 defaults:

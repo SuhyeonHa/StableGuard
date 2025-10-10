@@ -24,6 +24,7 @@ import yaml
 import torch.nn.functional as F
 import albumentations as albu
 from watermark_anything.wam_utils import load_model_from_checkpoint
+from watermark_anything.data.metrics import msg_predict_inference
 from omniguard.model_invert import Model, init_model
 from omniguard.modules.Unet_common import DWT, IWT
 from omniguard.iml_vit_model import iml_vit_model
@@ -472,7 +473,9 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             image = transform(image).unsqueeze(0)  # shape [1, C, H, W]
             image_down = F.interpolate(image, size=(256, 256), mode="bilinear", align_corners=False)
             outputs = wam.detect(image_down)["preds"]
-            pred_mask = F.sigmoid(outputs[:, 0, :, :]).unsqueeze(0)
+            pred_mask = F.sigmoid(outputs[:, 0, :, :]).unsqueeze(0) # [1, 1, 256, 256]
+            pred_bit = outputs[:, 1:, :, :] # [1, 32, 256, 256]
+
             pred_mask = F.interpolate(pred_mask, size=(size, size), mode="bilinear", align_corners=False)
         
         elif target_model == "omniguard":
