@@ -1,5 +1,7 @@
 import os
 import warnings
+
+from watermark_anything.modules import common
 # Suppress warnings for cleaner output
 warnings.filterwarnings("ignore")
 
@@ -19,6 +21,14 @@ from dataset import age_collate_fn, AGEDataset
 import random
 from models import MultiplexingWatermarkVAEDecoder, MoEGuidedForensicNet
 import yaml
+import torch.nn.functional as F
+import albumentations as albu
+from watermark_anything.wam_utils import load_model_from_checkpoint
+from watermark_anything.data.metrics import msg_predict_inference
+from omniguard.model_invert import Model, init_model
+from omniguard.modules.Unet_common import DWT, IWT
+from omniguard.iml_vit_model import iml_vit_model
+from albumentations.pytorch import ToTensorV2
 
 def set_seed(seed: int = 42):
     random.seed(seed)
@@ -31,7 +41,7 @@ def set_seed(seed: int = 42):
     torch.backends.cudnn.benchmark = False
 
 
-def denormalize_tensor(tensor, value_range=None, scale_each=True):
+def denormalize_tensor(tensor, mode='minmax', value_range=None, scale_each=True):
     """
     Normalize tensor values into [0,1] (in-place style but returns a cloned tensor).
     This helper is used before feeding images to image-quality metrics such as PSNR/SSIM/LPIPS.
@@ -158,7 +168,7 @@ class Evaluation(object):
 
 
 @torch.no_grad()
-def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_name, num_bits=48, size=512):
+def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, model_img_size=512, num_bits=48, size=512):
     """
     Generate watermarked and tampered images from a source dataset using:
       - a pretrained diffusion VAE for reconstructing images (AutoencoderKL),
@@ -189,20 +199,31 @@ def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_
     pipe = StableDiffusionInpaintPipeline.from_pretrained(edit_model_name, cache_dir='/mnt/nas5/suhyeon/caches/')
     generator = torch.Generator().manual_seed(42)
 
+    # load model
+    if target_model == "stableguard":
+        # initialize and load weights for MultiplexingWatermarkVAEDecoder
+        mpw_vae_decoder = MultiplexingWatermarkVAEDecoder(num_bits=num_bits)
+        mpw_vae_decoder_weight = torch.load(os.path.join(weight_path, "mpw_vae_decoder.bin"), map_location="cpu")
+        mpw_vae_decoder.load_state_dict(mpw_vae_decoder_weight)
 
-    # initialize and load weights for MultiplexingWatermarkVAEDecoder
-    mpw_vae_decoder = MultiplexingWatermarkVAEDecoder(num_bits=num_bits)
-    mpw_vae_decoder_weight = torch.load(os.path.join(weight_path, "mpw_vae_decoder.bin"), map_location="cpu")
-    mpw_vae_decoder.load_state_dict(mpw_vae_decoder_weight)
+        # move models to GPU and set eval mode
+        original_vae = original_vae.cuda()
+        mpw_vae_decoder = mpw_vae_decoder.cuda()
+        original_vae.eval()
+        mpw_vae_decoder.eval()
 
-    # move models to GPU and set eval mode
-    original_vae = original_vae.cuda()
-    mpw_vae_decoder = mpw_vae_decoder.cuda()
-    original_vae.eval()
-    mpw_vae_decoder.eval()
+    elif target_model == "wam":
+        wam = load_model_from_checkpoint(weight_path, num_bits).cuda().eval()
+
+    elif target_model == "omniguard":
+        net = Model(checkpoint=weight_path).cuda().eval()
+        init_model(net)
+        state_dicts = torch.load(os.path.join(weight_path, "model_checkpoint_01500.pt"), map_location="cpu", weights_only=False)
+        network_state_dict = {k.removeprefix('module.'):v for k,v in state_dicts['net'].items()}
+        net.load_state_dict(network_state_dict)
 
     # prepare dataloader for validation images
-    val_dataset = AGEDataset(data_root=src_image_path, mode="val", size=size)
+    val_dataset = AGEDataset(data_root=src_image_path, norm_type=norm, mode="val", size=size)
     val_dataloader = DataLoader(
         val_dataset,
         shuffle=False,
@@ -233,19 +254,47 @@ def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_
         masks = batch["masks"].cuda()
         image_names = batch["image_names"]
 
-        # VAE encode -> sample latents -> decode back to image (reconstruction)
-        latents = original_vae.encode(images).latent_dist.sample()
-        decode_images = original_vae.decode(latents, return_dict=False)[0]
+        # embed watermark
+        if target_model == "stableguard":
+            # VAE encode -> sample latents -> decode back to image (reconstruction)
+            latents = original_vae.encode(images).latent_dist.sample()
+            decode_images = original_vae.decode(latents, return_dict=False)[0]
 
-        # prepare latents for the watermark decoder (post-quant conv if required by model)
-        latents = original_vae.post_quant_conv(latents)
+            # prepare latents for the watermark decoder (post-quant conv if required by model)
+            latents = original_vae.post_quant_conv(latents)
 
-        # sample random binary messages for this batch
-        phi = torch.empty(latents.size(0), num_bits).uniform_(0, 1).cuda()
-        msgs = (torch.bernoulli(phi) + 1e-8)  # small eps to avoid exact zeros if needed
+            # sample random binary messages for this batch
+            phi = torch.empty(latents.size(0), num_bits).uniform_(0, 1).cuda()
+            msgs = (torch.bernoulli(phi) + 1e-8)  # small eps to avoid exact zeros if needed
 
-        # produce watermarked cover images from latents+msgs
-        cover_images = mpw_vae_decoder(latents, msgs=msgs)
+            # produce watermarked cover images from latents+msgs
+            cover_images = mpw_vae_decoder(latents, msgs=msgs)
+
+        elif target_model == "wam":
+            decode_images = torch.zeros_like(images)
+            images_down = F.interpolate(images, size=(256, 256), mode="bilinear", align_corners=False)
+            msgs = wam.get_random_msg(1)
+            outputs = wam.embed(images_down, msgs)
+            cover_images = outputs['imgs_w']
+            cover_images = F.interpolate(cover_images, size=(size, size), mode="bilinear", align_corners=False)
+            cover_images = denormalize_tensor(cover_images, scale_each=True) # [0, 1]
+            cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
+        
+        elif target_model == "omniguard":
+            decode_images = torch.zeros_like(images)
+            dwt = DWT()
+            image = Image.open("./omniguard/bluesky_white2.png").convert("RGB").resize((size, size))
+            result = np.array(image) / 255.
+            expanded_matrix = np.expand_dims(result, axis=0) 
+            secret = torch.from_numpy(np.ascontiguousarray(expanded_matrix)).float()
+            secret = secret.permute(0, 3, 1, 2).cuda()
+
+            cover_input = dwt((images + 1.0) / 2.0) # [-1, 1] to [0, 1]
+            secret_input = dwt(secret)
+            msgs = torch.randint(2, (1, 64)).to(torch.float32).cuda()
+
+            cover_images, output_z, out_temp, secret_temp = net(cover_input, secret_input, msgs)
+            cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
 
         # inpaint
         generated_images = pipe(prompt="", image=cover_images, mask_image=masks, generator=generator).images[0]
@@ -256,7 +305,7 @@ def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_
 
         # spliced images: replace regions indicated by mask with generated content
         # spliceless images: just the generated image without splicing
-        spliced_images = masks * generated_images + (1 - masks) * cover_images
+        spliced_images = masks * generated_images + (1 - masks) * cover_images # operation in [-1, 1]
         spliceless_images = generated_images
 
         # compute image similarity metrics and append their values (per-image scalars)
@@ -350,7 +399,7 @@ def generate_watermark_image(weight_path, src_image_path, save_path, edit_model_
 
 
 @torch.no_grad()
-def generate_tamper_mask(weight_path, eval_setting, save_path, num_bits=48, size=512):
+def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num_bits=48, size=512):
     """
     Use the trained forensic network (MoEGuidedForensicNet) to predict:
       - the embedded messages for each tampered image
@@ -363,50 +412,147 @@ def generate_tamper_mask(weight_path, eval_setting, save_path, num_bits=48, size
     os.makedirs(os.path.join(save_path, f"pred_mask_{eval_setting}"), exist_ok=True)
     tamper_image_path = os.path.join(save_path, f"{eval_setting}_images")
 
+    valid_exts = (".jpg", ".jpeg", ".png")
+
     # initialize and load the detector model
-    moe_gfn = MoEGuidedForensicNet(num_bits=num_bits)
-    moe_gfn_weight = torch.load(os.path.join(weight_path, "moe_gfn.bin"), map_location="cpu")
-    moe_gfn.load_state_dict(moe_gfn_weight)
-    moe_gfn = moe_gfn.cuda()
-    moe_gfn.eval()
+    if target_model == "stableguard":
+        moe_gfn = MoEGuidedForensicNet(num_bits=num_bits)
+        moe_gfn_weight = torch.load(os.path.join(weight_path, "moe_gfn.bin"), map_location="cpu")
+        moe_gfn.load_state_dict(moe_gfn_weight)
+        moe_gfn = moe_gfn.cuda()
+        moe_gfn.eval()
+    elif target_model == "wam":
+        wam = load_model_from_checkpoint(weight_path, num_bits).cuda().eval()
+    elif target_model == "omniguard":
+        net = Model(checkpoint=weight_path).cuda().eval()
+        init_model(net)
+        state_dicts = torch.load(os.path.join(weight_path, "model_checkpoint_01500.pt"), map_location="cpu", weights_only=False)
+        network_state_dict = {k.removeprefix('module.'):v for k,v in state_dicts['net'].items()}
+        net.load_state_dict(network_state_dict)
+        
+        extractor = iml_vit_model()
+        extractor.load_state_dict(torch.load(os.path.join(weight_path, "checkpoint-175.pth"), weights_only=False)['model'], strict=True)
+        extractor = extractor.cuda().eval()
 
     bit_acc = []
-    image_paths = os.listdir(tamper_image_path)
+    file_paths = os.listdir(tamper_image_path)
+    image_paths = [f for f in file_paths if f.lower().endswith(valid_exts)]
     image_paths.sort()
 
     # iterate files and run inference on each image (single-image inference)
     for image_path in tqdm(image_paths):
         # load and resize image to expected input size
         image = Image.open(os.path.join(tamper_image_path, image_path)).resize((size, size))
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Lambda(lambda x: x * 2 - 1),  # map [0,1] -> [-1,1] if model expects that
-        ])
-        image = transform(image).unsqueeze(0)  # shape [1, C, H, W]
 
-        # run detector on GPU
-        pred_msgs, pred_mask = moe_gfn(image.cuda())
+        if target_model == "stableguard":
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: x * 2 - 1),  # map [0,1] -> [-1,1] if model expects that
+            ])
+            image = transform(image).unsqueeze(0)  # shape [1, C, H, W]
 
-        # convert mask logits to probabilities
-        pred_mask = torch.sigmoid(pred_mask)
+            # run detector on GPU
+            pred_msgs, pred_mask = moe_gfn(image.cuda())
 
-        # save predicted mask image to disk
-        save_image(pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
+            # convert mask logits to probabilities
+            pred_mask = torch.sigmoid(pred_mask)
 
-        # load ground-truth message that was saved earlier during generation step
-        save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
+            # save predicted mask image to disk
+            save_image(pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
 
-        # compute bitwise accuracy between predicted messages and saved messages
-        pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
-        msgs_bin = torch.round(torch.sigmoid(save_msgs.squeeze(1)))
-        acc = (((pred_msgs_bin.eq(msgs_bin.data)).sum()) / num_bits).mean().item()
-        bit_acc.append(acc)
+            # load ground-truth message that was saved earlier during generation step
+            save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
 
+            # compute bitwise accuracy between predicted messages and saved messages
+            pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
+            msgs_bin = torch.round(torch.sigmoid(save_msgs.squeeze(1)))
+            acc = (((pred_msgs_bin.eq(msgs_bin.data)).sum()) / num_bits).mean().item()
+            bit_acc.append(acc)
+
+        elif target_model == "wam":
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+            ])
+            image = transform(image).unsqueeze(0).cuda()  # shape [1, C, H, W]
+            image_down = F.interpolate(image, size=(256, 256), mode="bilinear", align_corners=False)
+
+            outputs = wam.detect(image_down)["preds"]
+            pred_mask = F.sigmoid(outputs[:, 0, :, :]).unsqueeze(0) # [1, 1, 256, 256]
+            pred_bit = outputs[:, 1:, :, :] # [1, 32, 256, 256]
+            pred_message = msg_predict_inference(pred_bit, pred_mask).cpu().float()  # [1, 32]
+            
+            pred_mask = F.interpolate(pred_mask, size=(size, size), mode="bilinear", align_corners=False)
+            # WAM predicts the non-tampered region, so invert the mask
+            save_image(1-pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
+
+            # load ground-truth message that was saved earlier during generation step
+            save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
+            acc = (pred_message == save_msgs).float().mean().item()
+            bit_acc.append(acc)
+        
+        elif target_model == "omniguard":
+            dwt = DWT()
+            iwt = IWT()
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: x * 2 - 1),
+            ])
+            transform_extractor = albu.Compose([
+                albu.PadIfNeeded(          
+                    min_height=1024,
+                    min_width=1024, 
+                    border_mode=0, 
+                    value=0, 
+                    position='top_left',
+                    mask_value=0),
+                albu.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                albu.Crop(0, 0, 1024, 1024),
+                ToTensorV2()
+            ])
+            image = transform(image).unsqueeze(0)  # shape [1, C, H, W]
+            output_steg = dwt(image)
+            output_image, bits = net(output_steg.cuda(), rev=True)
+            secret_rev = output_image.narrow(1, 0, 12)
+            secret_rev = iwt(secret_rev)
+
+            artifact = secret_rev.permute(0, 2, 3, 1).squeeze().cpu().numpy() * 255
+            fuse = image.permute(0, 2, 3, 1).squeeze().cpu().numpy() * 255
+
+            artifact = transform_extractor(image=artifact)['image'].cuda().unsqueeze(0)
+            fuse = transform_extractor(image=fuse)['image'].cuda().unsqueeze(0)
+
+            pred_mask = extractor(artifact, fuse)
+            b, _, W, H = image.shape
+            pred_mask = pred_mask[:, :, 0:W, 0:H]
+
+            # save predicted mask image to disk
+            save_image(pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
+
+            # load ground-truth message that was saved earlier during generation step
+            # 64 bits (training) + zero-padding
+            save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
+
+            # compute bitwise accuracy between predicted messages and saved messages
+            pred_msgs_bin = (bits > 0).int()
+            msgs_bin = (save_msgs > 0).int()
+            pred_string = ''.join(str(x.item()) for x in pred_msgs_bin.flatten())
+            msgs_string = ''.join(str(x.item()) for x in msgs_bin.flatten())
+            
+            # remove zero-padding 
+            pred_string = pred_string[:num_bits]
+            correct_bits = sum(1 for a, b in zip(pred_string, msgs_string) if a == b)
+    
+            total_bits = len(msgs_string)
+            acc = correct_bits / total_bits
+            
+            bit_acc.append(acc)
+            
     # write bit accuracy summary to record file (append)
     msg = f"Bit Acc:{np.mean(bit_acc):.5f} \n"
     msg += "-" * 100 + "\n"
     print(msg)
-    with open(os.path.join(f"pred_mask_{eval_setting}", "record.txt"), "a+") as f:
+    with open(os.path.join(save_path, f"pred_mask_{eval_setting}", "record.txt"), "a+") as f:
         f.write(msg)
 
 def save_and_print_config(config, save_path):
@@ -433,32 +579,43 @@ def save_and_print_config(config, save_path):
 
 
 if __name__ == "__main__":
+    with open('config.yaml', 'r') as f:
+        default_config = yaml.safe_load(f)
     # ------------------ Configuration ------------------
-    c = {
-        'weight_path': "/mnt/nas5/suhyeon/checkpoints/stableguard/weights/clean",
+    run_config = {
         'src_image_path': "/mnt/nas5/suhyeon/datasets/valAGE-Set",
-        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/stableguard/512_valAGE_sd",
+        'target_model': "wam", # ["omniguard", "wam", "stableguard"]
+        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/wam/512_valAGE_sd",
         'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
-        'num_bits': 48,
         'size': 512,
-        'seed': 42
     }
     # ---------------------------------------------------
-    save_and_print_cfg = save_and_print_config(c, c['save_path'])
+
+    c = {}
+    c.update(default_config['defaults'])
+    c.update(run_config)
+    c['weight_path'] = default_config['weight_paths'][c['target_model']]
+    c['normalization'] = default_config['normalization'][c['target_model']]
+    c['num_bits'] = default_config['num_bits'][c['target_model']]
 
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
-    generate_watermark_image(weight_path=c['weight_path'],
-                             src_image_path=c['src_image_path'],
-                             save_path=c['save_path'],
-                             edit_model_name=c['edit_model_name'],
-                             num_bits=c['num_bits'], size=c['size'])
+    # save_and_print_cfg = save_and_print_config(c, c['save_path'])
+    # generate_watermark_image(norm=c['normalization'],
+    #                          weight_path=c['weight_path'],
+    #                          target_model=c['target_model'],
+    #                          src_image_path=c['src_image_path'],
+    #                          save_path=c['save_path'],
+    #                          edit_model_name=c['edit_model_name'],
+    #                          num_bits=c['num_bits'],
+    #                          size=c['size'])
 
     # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     eval_setting = ["spliced", "spliceless"]
     for setting in eval_setting:
         generate_tamper_mask(weight_path=c['weight_path'],
                             eval_setting=setting,
+                            target_model=c['target_model'],
                             save_path=c['save_path'],
                             num_bits=c['num_bits'],
                             size=c['size'])
