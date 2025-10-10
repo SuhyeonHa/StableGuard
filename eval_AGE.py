@@ -514,6 +514,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             save_image(pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
 
             # load ground-truth message that was saved earlier during generation step
+            # 64 bits (training) + zero-padding
             save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
 
             # compute bitwise accuracy between predicted messages and saved messages
@@ -521,9 +522,9 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             msgs_bin = (save_msgs > 0).int()
             pred_string = ''.join(str(x.item()) for x in pred_msgs_bin.flatten())
             msgs_string = ''.join(str(x.item()) for x in msgs_bin.flatten())
-            if len(pred_string) > len(msgs_string):
-                pred_string = pred_string[:len(msgs_string)]
-
+            
+            # remove zero-padding 
+            pred_string = pred_string[:num_bits]
             correct_bits = sum(1 for a, b in zip(pred_string, msgs_string) if a == b)
     
             total_bits = len(msgs_string)
@@ -570,7 +571,6 @@ if __name__ == "__main__":
         'target_model': "omniguard", # ["omniguard", "wam", "stableguard"]
         'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/512_valAGE_sd",
         'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
-        'num_bits': 48,
         'size': 512,
     }
     # ---------------------------------------------------
@@ -580,6 +580,7 @@ if __name__ == "__main__":
     c.update(run_config)
     c['weight_path'] = default_config['weight_paths'][c['target_model']]
     c['normalization'] = default_config['normalization'][c['target_model']]
+    c['num_bits'] = default_config['num_bits'][c['target_model']]
 
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
