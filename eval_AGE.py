@@ -470,7 +470,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             transform = transforms.Compose([
                 transforms.ToTensor(),
             ])
-            image = transform(image).unsqueeze(0)  # shape [1, C, H, W]
+            image = transform(image).unsqueeze(0).cuda()  # shape [1, C, H, W]
             image_down = F.interpolate(image, size=(256, 256), mode="bilinear", align_corners=False)
 
             outputs = wam.detect(image_down)["preds"]
@@ -547,7 +547,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
     msg = f"Bit Acc:{np.mean(bit_acc):.5f} \n"
     msg += "-" * 100 + "\n"
     print(msg)
-    with open(os.path.join(f"pred_mask_{eval_setting}", "record.txt"), "a+") as f:
+    with open(os.path.join(save_path, f"pred_mask_{eval_setting}", "record.txt"), "a+") as f:
         f.write(msg)
 
 def save_and_print_config(config, save_path):
@@ -579,8 +579,8 @@ if __name__ == "__main__":
     # ------------------ Configuration ------------------
     run_config = {
         'src_image_path': "/mnt/nas5/suhyeon/datasets/valAGE-Set",
-        'target_model': "omniguard", # ["omniguard", "wam", "stableguard"]
-        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/512_valAGE_sd",
+        'target_model': "wam", # ["omniguard", "wam", "stableguard"]
+        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/wam/512_valAGE_sd",
         'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
         'size': 512,
     }
@@ -595,15 +595,15 @@ if __name__ == "__main__":
 
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
-    save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    generate_watermark_image(norm=c['normalization'],
-                             weight_path=c['weight_path'],
-                             target_model=c['target_model'],
-                             src_image_path=c['src_image_path'],
-                             save_path=c['save_path'],
-                             edit_model_name=c['edit_model_name'],
-                             num_bits=c['num_bits'],
-                             size=c['size'])
+    # save_and_print_cfg = save_and_print_config(c, c['save_path'])
+    # generate_watermark_image(norm=c['normalization'],
+    #                          weight_path=c['weight_path'],
+    #                          target_model=c['target_model'],
+    #                          src_image_path=c['src_image_path'],
+    #                          save_path=c['save_path'],
+    #                          edit_model_name=c['edit_model_name'],
+    #                          num_bits=c['num_bits'],
+    #                          size=c['size'])
 
     # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     eval_setting = ["spliced", "spliceless"]
