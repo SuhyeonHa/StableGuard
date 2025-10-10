@@ -160,7 +160,9 @@ class AGEDataset(Dataset):
         self.data_root = data_root
         self.size = size
         self.mode = mode
-        self.images_list = os.listdir(self.data_root)
+        valid_exts = [".jpg", ".jpeg", ".png"]
+        file_list = os.listdir(self.data_root)
+        self_images_list = [f for f in file_list if f.lower().endswith(valid_exts)]
         self.images_list.sort()
         self.mask_transform = transforms.Compose([
             transforms.ToTensor(),
