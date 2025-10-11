@@ -2,14 +2,16 @@
  CUDA_VISIBLE_DEVICES=0,1 accelerate launch --num_processes 2 --main_process_port 58110 --multi-gpu --mixed_precision "bf16" \
   train.py \
   --pretrained_model_name_or_path="stabilityai/stable-diffusion-2-1-base" \
-  --data_root_path="/home/yanghaoxin/dataset/coco" \
-  --mask_pool_path="datasets/mask_pool" \
+  --data_root_path="/mnt/nas5/suhyeon/datasets/coco-2017" \
+  --mask_pool_path="/mnt/nas5/suhyeon/datasets/coco-tamper-stableguard/datasets/mask_pool" \
   --resolution=256 \
   --train_batch_size=8 \
   --dataloader_num_workers=4 \
   --learning_rate=1e-4 \
   --weight_decay=1e-2 \
-  --output_dir="run/exp1" \
+  --output_dir="/mnt/nas5/suhyeon/projects/freqloc-ldm/exp1" \
   --save_steps=10000 \
   --num_train_epochs=10 \
-  --num_bits=48
+  --num_bits=48 \ 
+  --noise_strength 0.0 0.8 \
+  --cache_dir="/mnt/nas5/suhyeon/caches" \

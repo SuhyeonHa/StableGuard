@@ -15,6 +15,7 @@ from diffusers.models.unets.unet_2d_blocks import (
     get_down_block,
     get_up_block,
 )
+import random
 
 
 
@@ -95,7 +96,38 @@ class MsgAdapter(nn.Module):
         conv2 = self.conv2(conv1) 
         
         return conv2 + img_feature
+    
+class FreqLocAdapter(nn.Module):
+    def __init__(self, in_channels, watermark_size=32):
+        super(FreqLocAdapter, self).__init__()
+        self.watermark_size = watermark_size
+        self.watermark = nn.Parameter(torch.randn(1, 1, watermark_size, watermark_size)) # single-channel watermark
+        self.freq_conv1 = nn.Conv2d(in_channels * 2, in_channels * 2, 3, padding=1)
+        self.freq_conv2 = zero_module(nn.Conv2d(in_channels * 2, in_channels * 2, 3, padding=1))
+    
+    def forward(self, img_feature):
+        img_dtype = img_feature.dtype
+        B = img_feature.size(0)
+        watermark = self.watermark.repeat(B, 1, 1, 1) # [B, 1, 32, 32]
+        img_feature_f32 = img_feature.to(torch.float32)
 
+        scale_factor = img_feature.size(-1) // self.watermark_size
+        upsampler = nn.Upsample(scale_factor=scale_factor, mode='bilinear', align_corners=False)
+        watermark_up = upsampler(watermark)
+
+        freq_feature = torch.fft.fft2(img_feature_f32, dim=(-2, -1))
+        freq_watermarked = freq_feature + watermark_up
+        inputs = torch.cat([freq_watermarked.real, freq_watermarked.imag], dim=1)
+
+        x = F.relu(self.freq_conv1(inputs))
+        x = self.freq_conv2(x)
+
+        real_part, imag_part = torch.chunk(x, 2, dim=1)
+        freq_out = torch.complex(real_part.to(torch.float32), imag_part.to(torch.float32))
+
+        out_feature = torch.fft.ifft2(freq_out, dim=(-2, -1)).real
+
+        return out_feature.to(img_dtype) + img_feature
 
 class MultiplexingWatermarkVAEDecoder(nn.Module):
     r"""
@@ -131,7 +163,7 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         act_fn: str = "silu",
         norm_type: str = "group",  # group, spatial
         mid_block_add_attention=True,
-        num_bits=64,
+        watermark_size: int = 32,
     ):
         super().__init__()
         self.layers_per_block = layers_per_block
@@ -146,7 +178,7 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
 
         self.mid_block = None
         self.up_blocks = nn.ModuleList([])
-        self.msg_adapters = nn.ModuleList([])
+        self.freqloc_adapters = nn.ModuleList([])
 
         temb_channels = in_channels if norm_type == "spatial" else None
 
@@ -170,7 +202,7 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
             prev_output_channel = output_channel
             output_channel = reversed_block_out_channels[i]
 
-            self.msg_adapters.append(MsgAdapter(in_channels=prev_output_channel, num_bits=num_bits)) # add msg adapter to each layer
+            self.freqloc_adapters.append(FreqLocAdapter(in_channels=prev_output_channel, watermark_size=watermark_size)) # add freq loc adapter to each layer
 
             is_final_block = i == len(block_out_channels) - 1
 
@@ -207,7 +239,8 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         self,
         sample: torch.FloatTensor,
         latent_embeds: Optional[torch.FloatTensor] = None,
-        msgs: torch.FloatTensor = None,
+        img_size: Tuple[int] = None,
+        noise_strength: list = [0.0, 0.8],
     ) -> torch.FloatTensor:
         r"""The forward method of the `Decoder` class."""
 
@@ -219,8 +252,8 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         sample = sample.to(upscale_dtype)
 
         # up
-        for up_block, adaptor in zip(self.up_blocks, self.msg_adapters): # add watermark
-            sample = adaptor(sample, msgs)
+        for up_block, adaptor in zip(self.up_blocks, self.freqloc_adapters): # add watermark
+            sample = adaptor(sample)
             sample = up_block(sample, latent_embeds)
         # post-process
         if latent_embeds is None:
@@ -228,5 +261,10 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         else:
             sample = self.conv_norm_out(sample, latent_embeds)
         sample = self.conv_act(sample)
-        sample = self.conv_out(sample)
+
+        # VAE noise
+        rand_strength = random.uniform(noise_strength[0], noise_strength[1])
+        noise = torch.randn(img_size) * rand_strength
+
+        sample = self.conv_out(sample) + noise.to(sample.device)
         return sample

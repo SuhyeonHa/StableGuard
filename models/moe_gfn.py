@@ -309,7 +309,6 @@ class Decoder(nn.Module):
         norm_num_groups: int = 16,
         act_fn: str = "silu",
         norm_type: str = "group",  # group, spatial
-        num_bits: int = 64,
     ):
         super().__init__()
         self.layers_per_block = layers_per_block
@@ -376,14 +375,14 @@ class Decoder(nn.Module):
                                   nn.Conv2d(3, 1, 3,  stride=1, padding=1))
         
         # msg
-        self.msg = nn.Sequential(nn.Conv2d(block_out_channels[0]*2, 32, 3, stride=1, padding=1),
-                                 nn.GroupNorm(num_groups=16, num_channels=32, affine=True),
-                                 nn.SiLU(),
-                                 nn.Conv2d(32, 4, 3,  stride=1, padding=1),
-                                 nn.AdaptiveAvgPool2d(64),
-                                 nn.Flatten(1),
-                                 nn.Linear(64*64*4, num_bits)
-                                 )
+        # self.msg = nn.Sequential(nn.Conv2d(block_out_channels[0]*2, 32, 3, stride=1, padding=1),
+        #                          nn.GroupNorm(num_groups=16, num_channels=32, affine=True),
+        #                          nn.SiLU(),
+        #                          nn.Conv2d(32, 4, 3,  stride=1, padding=1),
+        #                          nn.AdaptiveAvgPool2d(64),
+        #                          nn.Flatten(1),
+        #                          nn.Linear(64*64*4, num_bits)
+        #                          )
 
     def forward(
         self,
@@ -405,16 +404,16 @@ class Decoder(nn.Module):
 
         # post-process
         mask = self.mask(sample)
-        msg = self.msg(sample)
+        # msg = self.msg(sample)
 
-        return mask, msg
+        # return mask, msg
+        return mask
 
 
 class MoEGuidedForensicNet(nn.Module):
     def __init__(
         self,
         in_channels: int = 3,
-        num_bits: int=64,
         down_block_types: Tuple[str] = ("DownEncoderBlock2D","DownEncoderBlock2D","DownEncoderBlock2D","DownEncoderBlock2D"),
         up_block_types: Tuple[str] = ("UpDecoderBlock2D","UpDecoderBlock2D","UpDecoderBlock2D","UpDecoderBlock2D"),
         block_out_channels: Tuple[int] = (64,128,256,512),
@@ -444,19 +443,18 @@ class MoEGuidedForensicNet(nn.Module):
             layers_per_block=layers_per_block,
             norm_num_groups=norm_num_groups,
             act_fn=act_fn,
-            num_bits=num_bits,
         )
 
     def forward(self, x):
         x = self.stem(x)
         latent, residual = self.encoder(x)
-        mask, msg = self.decoder(latent, residual)
-        return msg, mask
+        mask = self.decoder(latent, residual)
+        return mask
     
     def encoder_forward(self, x):
         latent, residual = self.encoder(x)
         return latent, residual
     
     def decoder_forward(self, latent, residual):
-        mask, msg = self.decoder(latent, residual)
-        return mask, msg
+        mask = self.decoder(latent, residual)
+        return mask
