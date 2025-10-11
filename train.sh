@@ -1,7 +1,6 @@
  #!/bin/bash
  # Tips: You should replace data_root_path with your local coco dataset path
- CUDA_VISIBLE_DEVICES=0,1 accelerate launch --num_processes 2 --main_process_port 58110 --multi-gpu --mixed_precision "bf16" \
-  train.py \
+ CUDA_VISIBLE_DEVICES=0,1 accelerate launch --config_file /app/accelerate_config.yaml train.py \
   --pretrained_model_name_or_path="stabilityai/stable-diffusion-2-1-base" \
   --data_root_path="/mnt/nas5/suhyeon/datasets/coco-2017" \
   --mask_pool_path="/mnt/nas5/suhyeon/datasets/coco-tamper-stableguard/datasets/mask_pool" \
@@ -16,3 +15,4 @@
   --num_bits=48 \ 
   --noise_strength 0.0 0.8 \
   --cache_dir="/mnt/nas5/suhyeon/caches" \
+  --watermark_size=32
