@@ -1,3 +1,4 @@
+ #!/bin/bash
  # Tips: You should replace data_root_path with your local coco dataset path
  CUDA_VISIBLE_DEVICES=0,1 accelerate launch --num_processes 2 --main_process_port 58110 --multi-gpu --mixed_precision "bf16" \
   train.py \

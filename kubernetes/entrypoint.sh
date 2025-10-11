@@ -21,4 +21,4 @@ cd "${GIT_REPO}"
 echo "Clone complete."
 
 # python eval_AGE.py
-python train.sh
+bash train.sh
