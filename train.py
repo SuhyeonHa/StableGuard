@@ -419,26 +419,26 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                 phi = torch.empty(latents.size(0), args.num_bits).uniform_(0,1)
                 msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
 
-            cover_images = mpw_vae_decoder(latents, msgs=msgs)
+            cover_images = mpw_vae_decoder(latents)
             rand_num = random.random()
             if rand_num <= 0.5:
                 tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
             elif rand_num > 0.5:
                 tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images   
 
-            pred_msgs, pred_mask = moe_gfn(tamper_images.to(dtype=weight_dtype))
-            msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
+            pred_mask = moe_gfn(tamper_images.to(dtype=weight_dtype))
+            # msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
             mask_loss = 0.2 * weighted_binary_cross_entropy(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone()) + \
                         0.8 * dice_loss(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone())
             lpips_loss = lpips(cover_images, decode_images.float().detach().clone()).mean() 
 
-            pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
-            msgs_bin = torch.round(torch.sigmoid(msgs.squeeze(1)))
+            # pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
+            # msgs_bin = torch.round(torch.sigmoid(msgs.squeeze(1)))
             # Gather the losses across all processes for logging (if we use distributed training).
-            avg_msg_loss += accelerator.gather(msg_loss.repeat(args.train_batch_size)).mean().item()
+            # avg_msg_loss += accelerator.gather(msg_loss.repeat(args.train_batch_size)).mean().item()
             avg_mask_loss += accelerator.gather(mask_loss.repeat(args.train_batch_size)).mean().item()
             avg_lpips_loss += accelerator.gather(lpips_loss.repeat(args.train_batch_size)).mean().item()
-            avg_bit_correct += accelerator.gather((pred_msgs_bin.eq(msgs_bin.data).sum()) / (args.train_batch_size * args.num_bits)).mean().item()
+            # avg_bit_correct += accelerator.gather((pred_msgs_bin.eq(msgs_bin.data).sum()) / (args.train_batch_size * args.num_bits)).mean().item()
 
     avg_msg_loss = avg_msg_loss / (step + 1)
     avg_mask_loss = avg_mask_loss / (step + 1)
