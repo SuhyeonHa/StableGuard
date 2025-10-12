@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from accelerate import Accelerator, DistributedDataParallelKwargs
 from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration
-from diffusers import AutoencoderKL
+from diffusers import AutoencoderKL, StableDiffusionInpaintPipeline
 from diffusers.training_utils import cast_training_params
 from tqdm import tqdm
 from torchvision.utils import save_image
@@ -24,6 +24,7 @@ from dataset import CocoDataset, collate_fn
 from losses import WatsonDistanceVgg, weighted_binary_cross_entropy, dice_loss
 from models import MultiplexingWatermarkVAEDecoder, MoEGuidedForensicNet
 from utils_img import round_pixel
+from torchvision.transforms.functional import to_tensor
 
 
 
@@ -195,6 +196,11 @@ def main():
     moe_gfn = MoEGuidedForensicNet()
     lpips = LPIPS(net="vgg") # WatsonDistanceVgg() both Perceptual loss is ok, WatsonDistanceVgg can get better image quality
 
+    inpainter = StableDiffusionInpaintPipeline.from_pretrained(
+        "sd-legacy/stable-diffusion-inpainting",
+        cache_dir=args.cache_dir
+    )
+
     for name, param in original_vae.decoder.named_parameters():
         if name in mpw_vae_decoder.state_dict():
             mpw_vae_decoder.state_dict()[name].copy_(param.detach().clone())
@@ -217,6 +223,7 @@ def main():
     original_vae = original_vae.to(accelerator.device, dtype=weight_dtype)
     lpips = lpips.to(accelerator.device)
     mpw_vae_decoder = mpw_vae_decoder.to(accelerator.device, dtype=weight_dtype)
+    inpainter = inpainter.to(accelerator.device, dtype=weight_dtype)
 
     cast_training_params([mpw_vae_decoder])
 
@@ -260,8 +267,8 @@ def main():
         accelerator.prepare(mpw_vae_decoder, moe_gfn, optimizer, lr_scheduler, train_dataloader, val_dataloader)
 
     for epoch in range(0, args.num_train_epochs):
-        train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, optimizer, lr_scheduler, lpips, writer, logger)
-        val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, lpips, logger)
+        # train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, optimizer, lr_scheduler, lpips, writer, logger)
+        val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, lpips, logger, inpainter)
         save_path = os.path.join(args.output_dir, f"checkpoint-last")
         accelerator.save_state(save_path, safe_serialization=False)
 
@@ -399,7 +406,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 
 
 @torch.no_grad()
-def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, lpips, logger):
+def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, lpips, logger, inpainter):
     mpw_vae_decoder.eval()
     moe_gfn.eval()
     original_vae.eval()
@@ -407,6 +414,7 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
     avg_mask_loss = 0
     avg_lpips_loss = 0
     avg_bit_correct = 0
+
     for step, batch in enumerate(tqdm(val_dataloader)):
         with accelerator.autocast():
             images = batch["images"]
@@ -419,17 +427,29 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                 phi = torch.empty(latents.size(0), args.num_bits).uniform_(0,1)
                 msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
 
-            cover_images = mpw_vae_decoder(latents)
-            rand_num = random.random()
-            if rand_num <= 0.5:
-                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
-            elif rand_num > 0.5:
-                tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images   
+            cover_images = mpw_vae_decoder(latents, img_size=images.shape, noise_strength=[0.0, 0.0])
 
-            pred_mask = moe_gfn(tamper_images.to(dtype=weight_dtype))
+            # prepare inpainting inputs
+            inpaint_inputs = F.interpolate(cover_images, size=(512, 512), mode='bilinear', align_corners=False)
+            inpaint_inputs = (inpaint_inputs / 2.0) + 0.5 # [-1, 1] to [0, 1]
+            inpaint_inputs = inpaint_inputs.clamp(0, 1)
+
+            tamper_images = inpainter(prompt=[""]*images.size(0), image=inpaint_inputs, mask_image=random_masks, num_inference_steps=20, output_type='pt').images
+            spliceless_images = F.interpolate(tamper_images, size=(args.resolution, args.resolution), mode='bilinear', align_corners=False) # [0, 1]
+            
+            # spliced
+            inpaint_inputs = F.interpolate(inpaint_inputs, size=(args.resolution, args.resolution), mode='bilinear', align_corners=False)
+            binary_mask = (random_masks > 0.5).to(images.dtype)
+            spliced_images = binary_mask * spliceless_images.detach().clone() + (1 - binary_mask) * inpaint_inputs
+
+            spliceless_images = (spliceless_images - 0.5) * 2. # [0, 1] to [-1, 1]
+            spliced_images = (spliced_images - 0.5) * 2. # [0, 1] to [-1, 1]
+
+            pred_mask_spliceless = moe_gfn(spliceless_images.to(dtype=weight_dtype))
+            pred_mask_spliced = moe_gfn(spliced_images.to(dtype=weight_dtype))
             # msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
-            mask_loss = 0.2 * weighted_binary_cross_entropy(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone()) + \
-                        0.8 * dice_loss(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone())
+            mask_loss = 0.2 * weighted_binary_cross_entropy(pred_mask_spliceless, F.interpolate(random_masks, (pred_mask_spliceless.size(2), pred_mask_spliceless.size(3))).detach().clone()) + \
+                        0.8 * dice_loss(pred_mask_spliceless, F.interpolate(random_masks, (pred_mask_spliceless.size(2), pred_mask_spliceless.size(3))).detach().clone())
             lpips_loss = lpips(cover_images, decode_images.float().detach().clone()).mean() 
 
             # pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
@@ -439,6 +459,8 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             avg_mask_loss += accelerator.gather(mask_loss.repeat(args.train_batch_size)).mean().item()
             avg_lpips_loss += accelerator.gather(lpips_loss.repeat(args.train_batch_size)).mean().item()
             # avg_bit_correct += accelerator.gather((pred_msgs_bin.eq(msgs_bin.data).sum()) / (args.train_batch_size * args.num_bits)).mean().item()
+
+        break # only one step for validation to save time
 
     avg_msg_loss = avg_msg_loss / (step + 1)
     avg_mask_loss = avg_mask_loss / (step + 1)
@@ -455,8 +477,11 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
         result_images = torch.cat([decode_images[:args.train_batch_size], 
                                    cover_images[:args.train_batch_size], 
                                    ((cover_images - decode_images) *10)[:args.train_batch_size],
+                                   spliceless_images[:args.train_batch_size],
+                                   spliced_images[:args.train_batch_size],
                                    random_masks.repeat(1, 3, 1, 1)[:args.train_batch_size], 
-                                   F.sigmoid(F.interpolate(pred_mask, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size]],
+                                   F.sigmoid(F.interpolate(pred_mask_spliceless, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size],
+                                   F.sigmoid(F.interpolate(pred_mask_spliced, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size]],
                                    dim=0).detach().clone()
         save_image(result_images, os.path.join(args.output_dir, 'images/test', '%s.jpg' % epoch), normalize=True, scale_each=True, nrow=args.train_batch_size)   
 
