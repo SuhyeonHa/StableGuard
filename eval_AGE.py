@@ -495,7 +495,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             dwt = DWT()
             iwt = IWT()
             transform = transforms.Compose([
-                transforms.ToTensor()
+                transforms.ToTensor(),
             ])
             transform_extractor = albu.Compose([
                 albu.PadIfNeeded(          
