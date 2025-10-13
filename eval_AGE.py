@@ -166,6 +166,77 @@ class Evaluation(object):
         with open(os.path.join(save_path, "record.txt"), "a+") as f:
             f.write(msg)
 
+class Evaluation_Fidelity(object):
+    """
+    Evaluation helper that reads original and watermarked images from disk,
+    computes image-similarity metrics (PSNR/SSIM/LPIPS).
+    """
+
+    def __init__(self, wm_path, ori_path, img_size) -> None:
+        """
+        Args:
+            wm_path (str): directory containing watermarked images.
+            ori_path (str): directory containing original images.
+        """
+        self.wm_path = wm_path
+        self.ori_path = ori_path
+        self.img_size = img_size
+
+    def run(self, save_path):
+        """
+        Iterate over watermarked image found in self.wm_path, load the corresponding original,
+        compute per-image similarity metrics, accumulate them, print a summary and append to a record file.
+
+        Args:
+            save_path (str): directory in which to write record.txt (appends).
+        """
+        total_psnr = []
+        total_ssim = []
+        total_lpips = []
+
+        # list prediction files in prediction directory
+        wm_images_path = os.listdir(self.wm_path)
+
+        # iterate through each predicted mask filename
+        for wm_image_path in tqdm(wm_images_path):
+            try:
+                # open watermarked image and corresponding original image
+                wm_image = Image.open(os.path.join(self.wm_path, wm_image_path)).convert("RGB")
+                ori_image = Image.open(os.path.join(self.ori_path, wm_image_path)).convert("RGB")
+
+                ori_image = ori_image.resize((self.img_size, self.img_size))
+            except Exception:
+                # skip files that cannot be opened / matched
+                continue
+
+            # convert PIL images to tensors with shape (1, C, H, W)
+            wm_tensor = T.ToTensor()(wm_image).unsqueeze(0)
+            ori_tensor = T.ToTensor()(ori_image).unsqueeze(0)
+
+            # resize ground-truth to match predicted mask spatial size if needed
+            ori_tensor = torch.nn.functional.interpolate(ori_tensor, (wm_tensor.size(2), wm_tensor.size(3)))
+
+            # call evaluator batch_update for each metric (these update internal state or return stat)
+            psnr_value = psnr(wm_tensor, ori_tensor).mean()
+            ssim_value = ssim(wm_tensor, ori_tensor).mean()
+            lpips_value = LPIPS(reduction='none')(wm_tensor, ori_tensor).mean()
+
+            # append scalars to lists, skipping NaNs
+            if not torch.any(torch.isnan(psnr_value)):
+                total_psnr.append(psnr_value.item())
+            if not torch.any(torch.isnan(ssim_value)):
+                total_ssim.append(ssim_value.item())
+            if not torch.any(torch.isnan(lpips_value)):
+                total_lpips.append(lpips_value.item())
+
+        # compute aggregated means and print/write a summary line
+        msg = f"Tampering PSNR:{np.mean(total_psnr):.5f}, SSIM:{np.mean(total_ssim):.5f}, LPIPS: {np.mean(total_lpips):.5f}\n"
+        print(msg)
+
+        # append to record file under save_path
+        with open(os.path.join(save_path, "record.txt"), "a+") as f:
+            f.write(msg)
+
 
 @torch.no_grad()
 def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, model_img_size=512, num_bits=48, size=512):
@@ -583,8 +654,8 @@ if __name__ == "__main__":
     # ------------------ Configuration ------------------
     run_config = {
         'src_image_path': "/mnt/nas5/suhyeon/datasets/valAGE-Set",
-        'target_model': "wam", # ["omniguard", "wam", "stableguard"]
-        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/wam/512_valAGE_sd",
+        'target_model': "omniguard", # ["omniguard", "wam", "stableguard"]
+        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/512_valAGE_sd",
         'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
         'size': 512,
     }
@@ -610,14 +681,18 @@ if __name__ == "__main__":
     #                          size=c['size'])
 
     # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
-    eval_setting = ["spliced", "spliceless"]
-    for setting in eval_setting:
-        generate_tamper_mask(weight_path=c['weight_path'],
-                            eval_setting=setting,
-                            target_model=c['target_model'],
-                            save_path=c['save_path'],
-                            num_bits=c['num_bits'],
-                            size=c['size'])
-        # 3) Evaluate predicted masks against ground-truth masks saved in disk
-        eva = Evaluation(f"{c['save_path']}/pred_mask_{setting}", f"{c['save_path']}/gt")
-        eva.run(f"{c['save_path']}/pred_mask_{setting}")
+    # eval_setting = ["spliced", "spliceless"]
+    # for setting in eval_setting:
+    #     generate_tamper_mask(weight_path=c['weight_path'],
+    #                         eval_setting=setting,
+    #                         target_model=c['target_model'],
+    #                         save_path=c['save_path'],
+    #                         num_bits=c['num_bits'],
+    #                         size=c['size'])
+    #     # 3) Evaluate predicted masks against ground-truth masks saved in disk
+    #     eva = Evaluation(f"{c['save_path']}/pred_mask_{setting}", f"{c['save_path']}/gt")
+    #     eva.run(f"{c['save_path']}/pred_mask_{setting}")
+
+    # 4) Evaluate fidelity between watermarked and original images
+    eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", img_size=c['size'])
+    eva_fid.run(f"{c['save_path']}/cover_images")
