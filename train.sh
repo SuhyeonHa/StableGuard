@@ -9,7 +9,7 @@
   --dataloader_num_workers=4 \
   --learning_rate=1e-4 \
   --weight_decay=1e-2 \
-  --output_dir="/mnt/nas5/suhyeon/projects/freqloc-ldm/exp1" \
+  --output_dir="/mnt/nas5/suhyeon/projects/freqloc-ldm/exp02-eval-inpaint" \
   --save_steps=10000 \
   --num_train_epochs=10 \
   --noise_strength 0.0 0.8 \
