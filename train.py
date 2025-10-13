@@ -313,12 +313,29 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # watermarked image
             cover_images = mpw_vae_decoder(latents, img_size=images.shape, noise_strength=args.noise_strength)
 
-            # random splicing
+            # add VAE noise
+            B, C, H, W = cover_images.shape
+            view = cover_images.view(B, -1)
+            img_min = view.min(dim=1, keepdim=True)[0] # [B, 1]
+            img_max = view.max(dim=1, keepdim=True)[0]
+
+            img_min = img_min.view(B, 1, 1, 1) # [B, 1, 1, 1]
+            img_max = img_max.view(B, 1, 1, 1)
+
+            cover_norm = (cover_images - img_min) / (img_max - img_min + 1e-6) # orig range -> [0, 1]
+            cover_latents = original_vae.encode(cover_norm).latent_dist.sample()
+            rand_strength = random.uniform(args.noise_strength[0], args.noise_strength[1])
+            noise = torch.randn_like(cover_latents) * rand_strength
+            cover_recon_images = original_vae.decode(cover_latents + noise, return_dict=False)[0]
+            cover_recon_images = cover_recon_images * (img_max - img_min) + img_min # [0, 1] -> orig range
+
+            # random splicing with clean and noisy images
             rand_num = random.random()
             if rand_num <= 0.5:
-                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_recon_images
             elif rand_num > 0.5:
-                tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
+                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+                # tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_recon_images
 
             # add_quantization
             tamper_images = round_pixel(tamper_images)
