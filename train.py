@@ -286,29 +286,29 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             images = batch["images"]
             random_masks = batch["random_masks"]
             # Convert images to latent space
-            with torch.no_grad():
-                latents = original_vae.encode(images).latent_dist.sample()
-                decode_images = original_vae.decode(latents, return_dict=False)[0]
-                latents = original_vae.post_quant_conv(latents)
+            # with torch.no_grad():
+            latents = original_vae.encode(images).latent_dist.sample()
+            decode_images = original_vae.decode(latents, return_dict=False)[0]
+            latents = original_vae.post_quant_conv(latents)
 
-                # get random watermark
-                phi = torch.empty(latents.size(0), args.num_bits).uniform_(0,1)
-                msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
-                
-                msgs_ = []
-                random_masks_ = []
-                for msg, random_mask in zip(msgs, random_masks):
-                    if random.random() < 0.1: # all zero msg
-                        msgs_.append(torch.zeros_like(msg))
-                    else:
-                        msgs_.append(msg)
+            # get random watermark
+            phi = torch.empty(latents.size(0), args.num_bits).uniform_(0,1)
+            msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
+            
+            msgs_ = []
+            random_masks_ = []
+            for msg, random_mask in zip(msgs, random_masks):
+                if random.random() < 0.1: # all zero msg
+                    msgs_.append(torch.zeros_like(msg))
+                else:
+                    msgs_.append(msg)
 
-                    if random.random() < 0.1: # fully untamper mask
-                        random_masks_.append(torch.zeros_like(random_mask))
-                    else:
-                        random_masks_.append(random_mask)
-                msgs = torch.stack(msgs_, dim=0)
-                random_masks = torch.stack(random_masks_, dim=0)
+                if random.random() < 0.1: # fully untamper mask
+                    random_masks_.append(torch.zeros_like(random_mask))
+                else:
+                    random_masks_.append(random_mask)
+            msgs = torch.stack(msgs_, dim=0)
+            random_masks = torch.stack(random_masks_, dim=0)
 
             # watermarked image
             cover_images = mpw_vae_decoder(latents, img_size=images.shape, noise_strength=args.noise_strength)
