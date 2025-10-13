@@ -267,7 +267,7 @@ def main():
         accelerator.prepare(mpw_vae_decoder, moe_gfn, optimizer, lr_scheduler, train_dataloader, val_dataloader)
 
     for epoch in range(0, args.num_train_epochs):
-        train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, optimizer, lr_scheduler, lpips, writer, logger)
+        # train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, optimizer, lr_scheduler, lpips, writer, logger)
         val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, lpips, logger, inpainter)
         save_path = os.path.join(args.output_dir, f"checkpoint-last")
         accelerator.save_state(save_path, safe_serialization=False)
@@ -418,7 +418,7 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
 
     for step, batch in enumerate(tqdm(val_dataloader)):
         with accelerator.autocast():
-            images = batch["images"]
+            images = batch["images"] # [-1, 1]
             random_masks = batch["random_masks"]
             # Convert images to latent space
             with torch.no_grad():
@@ -432,19 +432,29 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
 
             # prepare inpainting inputs
             inpaint_inputs = F.interpolate(cover_images, size=(512, 512), mode='bilinear', align_corners=False)
-            inpaint_inputs = (inpaint_inputs / 2.0) + 0.5 # [-1, 1] to [0, 1]
-            inpaint_inputs = inpaint_inputs.clamp(0, 1)
 
+            # cover_images are not guaranteed to be in [-1, 1] -> min-max normalization per image
+            B, C, H, W = inpaint_inputs.shape
+            view = inpaint_inputs.view(B, -1)
+            img_min = view.min(dim=1, keepdim=True)[0] # [B, 1]
+            img_max = view.max(dim=1, keepdim=True)[0]
+
+            img_min = img_min.view(B, 1, 1, 1) # [B, 1, 1, 1]
+            img_max = img_max.view(B, 1, 1, 1)
+
+            inpaint_inputs = (inpaint_inputs - img_min) / (img_max - img_min + 1e-6) # orig range -> [0, 1]
+
+            # inpainting
             tamper_images = inpainter(prompt=[""]*images.size(0), image=inpaint_inputs, mask_image=random_masks, num_inference_steps=20, output_type='pt').images
             spliceless_images = F.interpolate(tamper_images, size=(args.resolution, args.resolution), mode='bilinear', align_corners=False) # [0, 1]
             
             # spliced
             inpaint_inputs = F.interpolate(inpaint_inputs, size=(args.resolution, args.resolution), mode='bilinear', align_corners=False)
-            binary_mask = (random_masks > 0.5).to(images.dtype)
-            spliced_images = binary_mask * spliceless_images.detach().clone() + (1 - binary_mask) * inpaint_inputs
 
-            spliceless_images = (spliceless_images - 0.5) * 2. # [0, 1] to [-1, 1]
-            spliced_images = (spliced_images - 0.5) * 2. # [0, 1] to [-1, 1]
+            spliced_images = (1 - random_masks) * inpaint_inputs + random_masks * spliceless_images.detach().clone() # [0, 1]
+            
+            spliceless_images = spliceless_images * (img_max - img_min) + img_min # [0, 1] -> orig range
+            spliced_images = spliced_images * (img_max - img_min) + img_min # [0, 1] -> orig range
 
             pred_mask_spliceless = moe_gfn(spliceless_images.to(dtype=weight_dtype))
             pred_mask_spliced = moe_gfn(spliced_images.to(dtype=weight_dtype))
