@@ -267,7 +267,7 @@ def main():
         accelerator.prepare(mpw_vae_decoder, moe_gfn, optimizer, lr_scheduler, train_dataloader, val_dataloader)
 
     for epoch in range(0, args.num_train_epochs):
-        # train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, optimizer, lr_scheduler, lpips, writer, logger)
+        train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, optimizer, lr_scheduler, lpips, writer, logger)
         val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, lpips, logger, inpainter)
         save_path = os.path.join(args.output_dir, f"checkpoint-last")
         accelerator.save_state(save_path, safe_serialization=False)
