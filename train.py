@@ -357,7 +357,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # total loss
             # loss = mae_loss + lpips_loss + msg_loss + mask_loss 
-            loss = mae_loss + lpips_loss + 0.5 * mask_loss
+            loss = 0.5 * mae_loss + lpips_loss + mask_loss
 
             # for bit acc
             # pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
