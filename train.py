@@ -279,6 +279,9 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
     original_vae.train()
     global global_step
     begin = time.perf_counter()
+
+    max_noise_strength = (epoch + 1) / args.num_train_epochs
+
     for step, batch in enumerate(train_dataloader):
         lr = lr_scheduler.get_last_lr()[0]
         load_data_time = time.perf_counter() - begin
@@ -311,7 +314,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 random_masks = torch.stack(random_masks_, dim=0)
 
             # watermarked image
-            noisy_images = mpw_vae_decoder(latents, img_size=images.shape, noise_strength=args.noise_strength)
+            noisy_images = mpw_vae_decoder(latents, img_size=images.shape, noise_strength=[0.0, max_noise_strength])
             cover_images = mpw_vae_decoder(latents, img_size=images.shape, noise_strength=[0.0, 0.0])
 
             # add VAE noise
