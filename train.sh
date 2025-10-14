@@ -12,6 +12,6 @@
   --output_dir="/mnt/nas5/suhyeon/projects/freqloc-ldm/exp03-add-vae-noise" \
   --save_steps=10000 \
   --num_train_epochs=10 \
-  --noise_strength 0.0 0.8 \
+  --noise_strength 0.0 0.3 \
   --cache_dir="/mnt/nas5/suhyeon/caches" \
   --watermark_size=32
