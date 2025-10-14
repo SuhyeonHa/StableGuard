@@ -272,6 +272,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
     # load model
     if target_model == "stableguard":
+        # TODO: put the original source code for stableguard
         # initialize and load weights for MultiplexingWatermarkVAEDecoder
         mpw_vae_decoder = MultiplexingWatermarkVAEDecoder(num_bits=num_bits)
         mpw_vae_decoder_weight = torch.load(os.path.join(weight_path, "mpw_vae_decoder.bin"), map_location="cpu")
@@ -367,7 +368,6 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
             # produce watermarked cover images from latents+msgs
             cover_images = mpw_vae_decoder(latents)
-            cover_images = cover_images * 2.0 - 1.0
 
         elif target_model == "wam":
             decode_images = torch.zeros_like(images)
