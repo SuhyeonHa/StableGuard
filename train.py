@@ -286,53 +286,54 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             images = batch["images"]
             random_masks = batch["random_masks"]
             # Convert images to latent space
-            # with torch.no_grad():
-            latents = original_vae.encode(images).latent_dist.sample()
-            decode_images = original_vae.decode(latents, return_dict=False)[0]
-            latents = original_vae.post_quant_conv(latents)
+            with torch.no_grad():
+                latents = original_vae.encode(images).latent_dist.sample()
+                decode_images = original_vae.decode(latents, return_dict=False)[0]
+                latents = original_vae.post_quant_conv(latents)
 
-            # get random watermark
-            phi = torch.empty(latents.size(0), args.num_bits).uniform_(0,1)
-            msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
-            
-            msgs_ = []
-            random_masks_ = []
-            for msg, random_mask in zip(msgs, random_masks):
-                if random.random() < 0.1: # all zero msg
-                    msgs_.append(torch.zeros_like(msg))
-                else:
-                    msgs_.append(msg)
+                # get random watermark
+                phi = torch.empty(latents.size(0), args.num_bits).uniform_(0,1)
+                msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
+                
+                msgs_ = []
+                random_masks_ = []
+                for msg, random_mask in zip(msgs, random_masks):
+                    if random.random() < 0.1: # all zero msg
+                        msgs_.append(torch.zeros_like(msg))
+                    else:
+                        msgs_.append(msg)
 
-                if random.random() < 0.1: # fully untamper mask
-                    random_masks_.append(torch.zeros_like(random_mask))
-                else:
-                    random_masks_.append(random_mask)
-            msgs = torch.stack(msgs_, dim=0)
-            random_masks = torch.stack(random_masks_, dim=0)
+                    if random.random() < 0.1: # fully untamper mask
+                        random_masks_.append(torch.zeros_like(random_mask))
+                    else:
+                        random_masks_.append(random_mask)
+                msgs = torch.stack(msgs_, dim=0)
+                random_masks = torch.stack(random_masks_, dim=0)
 
             # watermarked image
-            cover_images = mpw_vae_decoder(latents, img_size=images.shape, noise_strength=args.noise_strength)
+            noisy_images = mpw_vae_decoder(latents, img_size=images.shape, noise_strength=args.noise_strength)
+            cover_images = mpw_vae_decoder(latents, img_size=images.shape, noise_strength=[0.0, 0.0])
 
             # add VAE noise
-            B, C, H, W = cover_images.shape
-            view = cover_images.view(B, -1)
-            img_min = view.min(dim=1, keepdim=True)[0] # [B, 1]
-            img_max = view.max(dim=1, keepdim=True)[0]
+            # B, C, H, W = cover_images.shape
+            # view = cover_images.view(B, -1)
+            # img_min = view.min(dim=1, keepdim=True)[0] # [B, 1]
+            # img_max = view.max(dim=1, keepdim=True)[0]
 
-            img_min = img_min.view(B, 1, 1, 1) # [B, 1, 1, 1]
-            img_max = img_max.view(B, 1, 1, 1)
+            # img_min = img_min.view(B, 1, 1, 1) # [B, 1, 1, 1]
+            # img_max = img_max.view(B, 1, 1, 1)
 
-            cover_norm = (cover_images - img_min) / (img_max - img_min + 1e-6) # orig range -> [0, 1]
-            cover_latents = original_vae.encode(cover_norm).latent_dist.sample()
-            rand_strength = random.uniform(args.noise_strength[0], args.noise_strength[1])
-            noise = torch.randn_like(cover_latents) * rand_strength
-            cover_recon_images = original_vae.decode(cover_latents + noise, return_dict=False)[0]
-            cover_recon_images = cover_recon_images * (img_max - img_min) + img_min # [0, 1] -> orig range
+            # cover_norm = (cover_images - img_min) / (img_max - img_min + 1e-6) # orig range -> [0, 1]
+            # cover_latents = original_vae.encode(cover_norm).latent_dist.sample()
+            # rand_strength = random.uniform(args.noise_strength[0], args.noise_strength[1])
+            # noise = torch.randn_like(cover_latents) * rand_strength
+            # cover_recon_images = original_vae.decode(cover_latents + noise, return_dict=False)[0]
+            # cover_recon_images = cover_recon_images * (img_max - img_min) + img_min # [0, 1] -> orig range
 
             # random splicing with clean and noisy images
             rand_num = random.random()
             if rand_num <= 0.5:
-                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_recon_images
+                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
             elif rand_num > 0.5:
                 tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
                 # tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_recon_images
@@ -356,7 +357,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # total loss
             # loss = mae_loss + lpips_loss + msg_loss + mask_loss 
-            loss = mae_loss + lpips_loss + mask_loss 
+            loss = mae_loss + lpips_loss + 0.5 * mask_loss
 
             # for bit acc
             # pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
@@ -408,6 +409,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                     result_images = torch.cat([decode_images[:args.train_batch_size], 
                                                cover_images[:args.train_batch_size], 
                                                ((cover_images - decode_images) *10)[:args.train_batch_size],
+                                               tamper_images[:args.train_batch_size],
                                                random_masks.repeat(1, 3, 1, 1)[:args.train_batch_size], 
                                                F.sigmoid(F.interpolate(pred_mask, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size]],
                                                dim=0).detach().clone()

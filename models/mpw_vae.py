@@ -246,6 +246,11 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         # [B, 4, 32, 32]
         sample = self.conv_in(sample)
         upscale_dtype = next(iter(self.up_blocks.parameters())).dtype
+
+        # inject VAE noise
+        rand_strength = random.uniform(noise_strength[0], noise_strength[1])
+        noise = torch.randn(sample.shape) * rand_strength
+        sample = sample + noise.to(sample.device).to(sample.dtype)
         
         # middle
         sample = self.mid_block(sample, latent_embeds)
@@ -263,10 +268,3 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         sample = self.conv_act(sample) # [B, 128, 256, 256]
         sample = self.conv_out(sample)
         return sample
-
-        # # VAE noise
-        # rand_strength = random.uniform(noise_strength[0], noise_strength[1])
-        # noise = torch.randn(img_size) * rand_strength
-
-        # sample = self.conv_out(sample) + noise.to(sample.device) # [B, 3, 256, 256]
-        # return sample 
