@@ -283,6 +283,18 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         original_vae.eval()
         mpw_vae_decoder.eval()
 
+    elif target_model == "ours":
+        # initialize and load weights for MultiplexingWatermarkVAEDecoder
+        mpw_vae_decoder = MultiplexingWatermarkVAEDecoder()
+        mpw_vae_decoder_weight = torch.load(os.path.join(weight_path, "pytorch_model.bin"), map_location="cpu")
+        mpw_vae_decoder.load_state_dict(mpw_vae_decoder_weight)
+
+        # move models to GPU and set eval mode
+        original_vae = original_vae.cuda()
+        mpw_vae_decoder = mpw_vae_decoder.cuda()
+        original_vae.eval()
+        mpw_vae_decoder.eval()
+
     elif target_model == "wam":
         wam = load_model_from_checkpoint(weight_path, num_bits).cuda().eval()
 
@@ -340,6 +352,22 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
             # produce watermarked cover images from latents+msgs
             cover_images = mpw_vae_decoder(latents, msgs=msgs)
+
+        elif target_model == "ours":
+            # VAE encode -> sample latents -> decode back to image (reconstruction)
+            latents = original_vae.encode(images).latent_dist.sample()
+            decode_images = original_vae.decode(latents, return_dict=False)[0]
+
+            # prepare latents for the watermark decoder (post-quant conv if required by model)
+            latents = original_vae.post_quant_conv(latents)
+
+            # sample random binary messages for this batch
+            phi = torch.empty(latents.size(0), num_bits).uniform_(0, 1).cuda()
+            msgs = (torch.bernoulli(phi) + 1e-8)  # small eps to avoid exact zeros if needed
+
+            # produce watermarked cover images from latents+msgs
+            cover_images = mpw_vae_decoder(latents)
+            cover_images = cover_images * 2.0 - 1.0
 
         elif target_model == "wam":
             decode_images = torch.zeros_like(images)
@@ -492,6 +520,12 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
         moe_gfn.load_state_dict(moe_gfn_weight)
         moe_gfn = moe_gfn.cuda()
         moe_gfn.eval()
+    elif target_model == "ours":
+        moe_gfn = MoEGuidedForensicNet()
+        moe_gfn_weight = torch.load(os.path.join(weight_path, "pytorch_model_1.bin"), map_location="cpu")
+        moe_gfn.load_state_dict(moe_gfn_weight)
+        moe_gfn = moe_gfn.cuda()
+        moe_gfn.eval()
     elif target_model == "wam":
         wam = load_model_from_checkpoint(weight_path, num_bits).cuda().eval()
     elif target_model == "omniguard":
@@ -539,6 +573,28 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             msgs_bin = torch.round(torch.sigmoid(save_msgs.squeeze(1)))
             acc = (((pred_msgs_bin.eq(msgs_bin.data)).sum()) / num_bits).mean().item()
             bit_acc.append(acc)
+        
+        elif target_model == "ours":
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: x * 2 - 1),  # map [0,1] -> [-1,1] if model expects that
+            ])
+            image = transform(image).unsqueeze(0)  # shape [1, C, H, W]
+
+            # run detector on GPU
+            pred_mask = moe_gfn(image.cuda())
+
+            # convert mask logits to probabilities
+            pred_mask = torch.sigmoid(pred_mask)
+
+            # save predicted mask image to disk
+            save_image(pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
+
+            # load ground-truth message that was saved earlier during generation step
+            # save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
+
+            # compute bitwise accuracy between predicted messages and saved messages
+            bit_acc.append(torch.tensor(0.0))
 
         elif target_model == "wam":
             transform = transforms.Compose([
@@ -654,8 +710,8 @@ if __name__ == "__main__":
     # ------------------ Configuration ------------------
     run_config = {
         'src_image_path': "/mnt/nas5/suhyeon/datasets/valAGE-Set",
-        'target_model': "stableguard", # ["omniguard", "wam", "stableguard"]
-        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/stableguard/512_valAGE_sd",
+        'target_model': "ours", # ["omniguard", "wam", "stableguard"]
+        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/ours/512_valAGE_sd",
         'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
         'size': 512,
     }
@@ -671,14 +727,14 @@ if __name__ == "__main__":
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
     # save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    # generate_watermark_image(norm=c['normalization'],
-    #                          weight_path=c['weight_path'],
-    #                          target_model=c['target_model'],
-    #                          src_image_path=c['src_image_path'],
-    #                          save_path=c['save_path'],
-    #                          edit_model_name=c['edit_model_name'],
-    #                          num_bits=c['num_bits'],
-    #                          size=c['size'])
+    generate_watermark_image(norm=c['normalization'],
+                             weight_path=c['weight_path'],
+                             target_model=c['target_model'],
+                             src_image_path=c['src_image_path'],
+                             save_path=c['save_path'],
+                             edit_model_name=c['edit_model_name'],
+                             num_bits=c['num_bits'],
+                             size=c['size'])
 
     # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     # eval_setting = ["spliced", "spliceless"]
@@ -693,6 +749,6 @@ if __name__ == "__main__":
     #     eva = Evaluation(f"{c['save_path']}/pred_mask_{setting}", f"{c['save_path']}/gt")
     #     eva.run(f"{c['save_path']}/pred_mask_{setting}")
 
-    # 4) Evaluate fidelity between watermarked and original images
-    eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", img_size=c['size'])
-    eva_fid.run(f"{c['save_path']}/cover_images")
+    # # 4) Evaluate fidelity between watermarked and original images
+    # eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", img_size=c['size'])
+    # eva_fid.run(f"{c['save_path']}/cover_images")
