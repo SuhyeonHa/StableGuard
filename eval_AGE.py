@@ -290,13 +290,13 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             secret = torch.from_numpy(np.ascontiguousarray(expanded_matrix)).float()
             secret = secret.permute(0, 3, 1, 2).cuda()
 
-            cover_input = dwt((images + 1.0) / 2.0) # [-1, 1] to [0, 1]
-            secret_input = dwt(secret)
-            msgs = torch.randint(2, (1, 64)).to(torch.float32).cuda()
-            
             # omniguard is trained on 512x512 images
-            cover_input = F.interpolate(cover_input, size=(512, 512), mode="bilinear", align_corners=False)
-            secret_input = F.interpolate(secret_input, size=(512, 512), mode="bilinear", align_corners=False)
+            cover_input = F.interpolate(images, size=(512, 512), mode="bilinear", align_corners=False)
+            secret_input = F.interpolate(secret, size=(512, 512), mode="bilinear", align_corners=False)
+
+            cover_input = dwt((cover_input + 1.0) / 2.0) # [-1, 1] to [0, 1]
+            secret_input = dwt(secret_input)
+            msgs = torch.randint(2, (1, 64)).to(torch.float32).cuda()
 
             cover_images, output_z, out_temp, secret_temp = net(cover_input, secret_input, msgs)
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
@@ -591,8 +591,8 @@ if __name__ == "__main__":
     # ------------------ Configuration ------------------
     run_config = {
         'src_image_path': "/mnt/nas5/suhyeon/datasets/valAGE-Set",
-        'target_model': "stableguard", # ["omniguard", "wam", "stableguard"]
-        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/stableguard/256_valAGE_sd",
+        'target_model': "omniguard", # ["omniguard", "wam", "stableguard"]
+        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/256_valAGE_sd",
         'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
         'size': 256,
     }
