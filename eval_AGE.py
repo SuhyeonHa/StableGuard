@@ -591,8 +591,8 @@ if __name__ == "__main__":
     # ------------------ Configuration ------------------
     run_config = {
         'src_image_path': "/mnt/nas5/suhyeon/datasets/valAGE-Set",
-        'target_model': "omniguard", # ["omniguard", "wam", "stableguard"]
-        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/256_valAGE_sd",
+        'target_model': "stableguard", # ["omniguard", "wam", "stableguard"]
+        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/stableguard/256_valAGE_sd",
         'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
         'size': 256,
     }
