@@ -297,7 +297,8 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
 
         # inpaint
-        generated_images = pipe(prompt="", image=cover_images, mask_image=masks, generator=generator).images[0]
+        inpaint_input = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
+        generated_images = pipe(prompt="", image=inpaint_input, mask_image=masks, generator=generator).images[0]
 
         # pil to tensor, normalize to [-1,1], add batch dim
         generated_images = ToTensor()(generated_images).cuda()
@@ -305,6 +306,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
         # spliced images: replace regions indicated by mask with generated content
         # spliceless images: just the generated image without splicing
+        generated_images = F.interpolate(generated_images, size=(size, size), mode="bilinear", align_corners=False)
         spliced_images = masks * generated_images + (1 - masks) * cover_images # operation in [-1, 1]
         spliceless_images = generated_images
 
