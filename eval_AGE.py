@@ -256,6 +256,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
         # embed watermark
         if target_model == "stableguard":
+            # stableguard is trained on 256x256 images
             # VAE encode -> sample latents -> decode back to image (reconstruction)
             latents = original_vae.encode(images).latent_dist.sample()
             decode_images = original_vae.decode(latents, return_dict=False)[0]
@@ -294,9 +295,9 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             msgs = torch.randint(2, (1, 64)).to(torch.float32).cuda()
             
             # omniguard is trained on 512x512 images
-            cover_inputs = F.interpolate(cover_input, size=(512, 512), mode="bilinear", align_corners=False)
-            secret_inputs = F.interpolate(secret_input, size=(512, 512), mode="bilinear", align_corners=False)
-            
+            cover_input = F.interpolate(cover_input, size=(512, 512), mode="bilinear", align_corners=False)
+            secret_input = F.interpolate(secret_input, size=(512, 512), mode="bilinear", align_corners=False)
+
             cover_images, output_z, out_temp, secret_temp = net(cover_input, secret_input, msgs)
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
 
