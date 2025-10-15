@@ -301,6 +301,8 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             cover_images, output_z, out_temp, secret_temp = net(cover_input, secret_input, msgs)
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
 
+            cover_images = F.interpolate(cover_images, size=(size, size), mode="bilinear", align_corners=False)
+
         # inpaint
         inpaint_input = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
         generated_images = pipe(prompt="", image=inpaint_input, mask_image=masks, generator=generator).images[0]
