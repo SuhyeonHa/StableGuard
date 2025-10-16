@@ -1,6 +1,5 @@
  # Tips: You should replace data_root_path with your local coco dataset path
- CUDA_VISIBLE_DEVICES=0,1 accelerate launch --num_processes 2 --main_process_port 58110 --multi-gpu --mixed_precision "bf16" \
-  train.py \
+ CUDA_VISIBLE_DEVICES=0,1 accelerate launch --config_file accelerate_config.yaml train.py \
   --pretrained_model_name_or_path="stabilityai/stable-diffusion-2-1-base" \
   --data_root_path="/home/yanghaoxin/dataset/coco" \
   --mask_pool_path="datasets/mask_pool" \
