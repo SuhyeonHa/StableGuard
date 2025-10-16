@@ -8,7 +8,7 @@ set -e
 
 # copy workspace from private git repo
 GIT_REPO="StableGuard"
-GIT_BRANCH="exp/evaluation_omniguard"
+GIT_BRANCH="exp/train_freqloc"
 TOKEN_FILE="/mnt/nas5/suhyeon/tokens/github_token.txt"
 
 export GITHUB_TOKEN=$(cat "$TOKEN_FILE")
@@ -20,4 +20,4 @@ git clone --branch "${GIT_BRANCH}" "${GIT_REPO_URL}"
 cd "${GIT_REPO}"
 echo "Clone complete."
 
-python eval_AGE.py
+bash train.sh
