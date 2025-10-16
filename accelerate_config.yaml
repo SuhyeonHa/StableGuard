@@ -1,5 +1,5 @@
 compute_environment: LOCAL_MACHINE
-distributed_type: 'no' ## note
+distributed_type: NO ## note
 downcast_bf16: 'no'
 gpu_ids: all
 machine_rank: 0
