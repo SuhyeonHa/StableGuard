@@ -495,7 +495,7 @@ class MoEGuidedForensicNet(nn.Module):
         # )
 
         # out for decoder
-        self.decoder = nn.Sequential(nn.Conv2d(block_out_channels[-1], block_out_channels[0], 3, padding=1),
+        self.decoder = nn.Sequential(nn.Conv2d(block_out_channels[1], block_out_channels[0], 3, padding=1),
                                  nn.SiLU(),
                                  nn.Conv2d(block_out_channels[0], out_channels, 3, padding=1))
 
