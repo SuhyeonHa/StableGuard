@@ -315,11 +315,13 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # random splicing
             rand_num = random.random()
-            if rand_num <= 0.5:
-                # tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+            if rand_num <= 0.25:
+                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+            elif rand_num > 0.25 and rand_num <= 0.5:
                 tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
-            elif rand_num > 0.5:
-                # tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
+            elif rand_num > 0.5 and rand_num <= 0.75:
+                tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
+            elif rand_num > 0.75:
                 tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
 
             # add_quantization
