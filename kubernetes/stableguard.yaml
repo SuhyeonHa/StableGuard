@@ -1,17 +1,17 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-freqloc
+  name: suhyeon-train-freqloc-noise
 spec:
   template:
     spec:
       runtimeClassName: nvidia
       # Uncomment this node Selector if you want to use a specific GPU type
       nodeSelector:
-        nvidia.com/gpu.product: NVIDIA-GeForce-RTX-3090-Ti
+        nvidia.com/gpu.product: NVIDIA-GeForce-RTX-3090
       
       # Uncomment below if you want to use a specific node
-      nodeName: sgvr-gpu-022
+      nodeName: sgvr-gpu-013
 
       # Uncomment below if you want to use a GPU device with memory > 15000
       # affinity:
