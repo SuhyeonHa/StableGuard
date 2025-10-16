@@ -168,7 +168,7 @@ class Evaluation(object):
 
 
 @torch.no_grad()
-def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, model_img_size=512, num_bits=48, size=512):
+def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, num_bits=48, size=512, start_idx=0):
     """
     Generate watermarked and tampered images from a source dataset using:
       - a pretrained diffusion VAE for reconstructing images (AutoencoderKL),
@@ -246,8 +246,15 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
     wm_sd_ssim_list = []
     wm_sd_lpips_list = []
 
+    if start_idx > 0:
+        print(f"Resuming from index {start_idx}...")
+
     # iterate over the validation dataloader
-    for batch in tqdm(val_dataloader):
+    for i, batch in enumerate(tqdm(val_dataloader)):
+
+        if i < start_idx:
+            continue
+
         # move batch tensors to GPU
         images = batch["images"].cuda()
         # generated_images = batch["generated_images"].cuda()
@@ -593,10 +600,11 @@ if __name__ == "__main__":
     # ------------------ Configuration ------------------
     run_config = {
         'src_image_path': "/mnt/nas5/suhyeon/datasets/valAGE-Set",
-        'target_model': "omniguard", # ["omniguard", "wam", "stableguard"]
-        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/256_valAGE_sd",
+        'target_model': "stableguard", # ["omniguard", "wam", "stableguard"]
+        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/stableguard/256_valAGE_sd",
         'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
         'size': 256,
+        'start_idx': 797,
     }
     # ---------------------------------------------------
 
@@ -617,7 +625,8 @@ if __name__ == "__main__":
                              save_path=c['save_path'],
                              edit_model_name=c['edit_model_name'],
                              num_bits=c['num_bits'],
-                             size=c['size'])
+                             size=c['size'],
+                             start_idx=c['start_idx'])
 
     # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     eval_setting = ["spliced", "spliceless"]

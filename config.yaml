@@ -20,3 +20,4 @@ defaults:
   size: 512
   target_model: "omniguard" # ["omniguard", "wam", "stableguard]
   save_path: "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/512_valAGE_sd"
+  start_idx: 0
