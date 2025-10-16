@@ -18,16 +18,17 @@
             "module": "accelerate.commands.launch",
             "console": "integratedTerminal",
             "env": {
-                "CUDA_VISIBLE_DEVICES": "2,3"
+                // "CUDA_VISIBLE_DEVICES": "2,3"
+                "CUDA_VISIBLE_DEVICES": "3"
             },
             "args": [
                 "--num_processes",
-                "2",
+                "1",
                 "--main_process_port",
                 "58111",
-                "--multi-gpu",
-                "--mixed_precision",
-                "no",
+                // "--multi-gpu",
+                // "--mixed_precision",
+                // "no",
                 "train.py",
                 "--pretrained_model_name_or_path=stabilityai/stable-diffusion-2-1-base",
                 "--data_root_path=/mnt/nas5/suhyeon/datasets/coco-2017",
@@ -40,6 +41,10 @@
                 "--output_dir=/mnt/nas5/suhyeon/projects/freqloc-ldm/test",
                 "--save_steps=10000",
                 "--num_train_epochs=10",
+                "--noise_strength",
+                "0.0",
+                "0.8",
+                "--num_bits=48"
             ]
         }
     ]

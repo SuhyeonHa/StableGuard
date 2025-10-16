@@ -149,6 +149,11 @@ def parse_args():
         ),
     )
     parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
+    parser.add_argument("--noise_strength", 
+                    type=float, 
+                    nargs='+', 
+                    default=[0.0, 0.8], 
+                    help="VAE decoder noise strength (e.g., --noise_strength 0.1 0.5)")
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -274,13 +279,13 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # Convert images to latent space
             with torch.no_grad():
                 latents = original_vae.encode(images).latent_dist.sample()
-                decode_images = original_vae.decode(latents, return_dict=False)[0]
-                latents = original_vae.post_quant_conv(latents)
+                decode_images = original_vae.decode(latents, return_dict=False)[0] 
+                latents = original_vae.post_quant_conv(latents) # to process for another model (not sd-vae)
 
                 # get random watermark
                 # phi = torch.empty(latents.size(0), args.num_bits).uniform_(0,1)
                 # msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
-
+                    
                 # generate all one msg
                 msgs = (torch.ones(latents.size(0), args.num_bits).to(accelerator.device, dtype=weight_dtype))
 
@@ -302,12 +307,20 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # watermarked image
             cover_images = mpw_vae_decoder(latents, msgs=msgs)
 
+            with torch.no_grad():
+                cover_latents = original_vae.encode(cover_images).latent_dist.sample()
+                rand_strength = random.uniform(args.noise_strength[0], args.noise_strength[1])
+                noise = torch.randn_like(cover_latents) * rand_strength
+                noisy_images = original_vae.decode(cover_latents + noise, return_dict=False)[0]
+
             # random splicing
             rand_num = random.random()
             if rand_num <= 0.5:
-                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+                # tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
             elif rand_num > 0.5:
-                tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
+                # tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
+                tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
 
             # add_quantization
             tamper_images = round_pixel(tamper_images)
@@ -410,17 +423,27 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             with torch.no_grad():
                 latents = original_vae.encode(images).latent_dist.sample()
                 decode_images = original_vae.decode(latents, return_dict=False)[0]
-                latents = original_vae.post_quant_conv(latents)
+                latents = original_vae.post_quant_conv(latents) # to process for another model (not vae)
                 phi = torch.empty(latents.size(0), args.num_bits).uniform_(0,1)
                 msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
 
             cover_images = mpw_vae_decoder(latents, msgs=msgs)
+
+            with torch.no_grad():
+                cover_latents = original_vae.encode(cover_images).latent_dist.sample()
+                rand_strength = random.uniform(args.noise_strength[0], args.noise_strength[1])
+                noise = torch.randn_like(cover_latents) * rand_strength
+                noisy_images = original_vae.decode(cover_latents + noise, return_dict=False)[0]
+
+            # random splicing
             rand_num = random.random()
             if rand_num <= 0.5:
-                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+                # tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
             elif rand_num > 0.5:
-                tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images   
-
+                # tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
+                tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
+                
             pred_mask = moe_gfn(tamper_images.to(dtype=weight_dtype))
             # msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
             mask_loss = 0.2 * weighted_binary_cross_entropy(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone()) + \
@@ -450,6 +473,7 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
         result_images = torch.cat([decode_images[:args.train_batch_size], 
                                    cover_images[:args.train_batch_size], 
                                    ((cover_images - decode_images) *10)[:args.train_batch_size],
+                                   tamper_images[:args.train_batch_size],
                                    random_masks.repeat(1, 3, 1, 1)[:args.train_batch_size], 
                                    F.sigmoid(F.interpolate(pred_mask, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size]],
                                    dim=0).detach().clone()

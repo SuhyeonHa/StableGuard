@@ -11,4 +11,5 @@
   --output_dir="/mnt/nas5/suhyeon/projects/freqloc-ldm/exp05-baseline-convnext" \
   --save_steps=10000 \
   --num_train_epochs=10 \
-  --num_bits=48
+  --num_bits=48 \
+  --noise_strength 0.0 0.8 \
