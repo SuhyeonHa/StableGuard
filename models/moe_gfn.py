@@ -61,7 +61,7 @@ class FeatureExtractor(nn.Module):
         residual = features
         
         # The 'latent' is conventionally the deepest feature map from the final stage.
-        latent = features[-1]
+        latent = features[1]
         
         return latent, residual
 
