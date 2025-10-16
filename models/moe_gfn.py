@@ -500,7 +500,7 @@ class MoEGuidedForensicNet(nn.Module):
                                  nn.Conv2d(block_out_channels[0], out_channels, 3, padding=1))
 
     def forward(self, x):
-        latent, residual = self.encoder(x)
+        latent, _ = self.encoder(x)
         mask = self.decoder(latent)
         return mask
     
