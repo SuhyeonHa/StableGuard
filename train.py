@@ -315,18 +315,23 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # random splicing
             rand_num = random.random()
-            if rand_num <= 0.25:
+
+            if rand_num <= 0.5:
                 tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
-            elif rand_num > 0.25 and rand_num <= 0.5:
-                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
-            elif rand_num > 0.5 and rand_num <= 0.75:
+            elif rand_num > 0.5:
                 tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
-            elif rand_num > 0.75:
-                tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
+
+            if rand_num <= 0.5:
+                tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
+            elif rand_num > 0.5:
+                tamper_noisy_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
 
             # add_quantization
             tamper_images = round_pixel(tamper_images)
             pred_mask = moe_gfn(tamper_images.to(dtype=weight_dtype))
+
+            tamper_noisy_images = round_pixel(tamper_noisy_images)
+            pred_noisy_mask = moe_gfn(tamper_noisy_images.to(dtype=weight_dtype))
 
             # Loss
             # similarity loss
@@ -337,12 +342,15 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
 
             # tamper loss
-            mask_loss = 0.2 * weighted_binary_cross_entropy(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone()) + \
-                        0.8 * dice_loss(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone())
+            mask_loss = 0.8 * weighted_binary_cross_entropy(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone()) + \
+                        0.2 * dice_loss(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone())
+
+            noisy_mask_loss = 0.8 * weighted_binary_cross_entropy(pred_noisy_mask, F.interpolate(random_masks, (pred_noisy_mask.size(2), pred_noisy_mask.size(3))).detach().clone()) + \
+                        0.2 * dice_loss(pred_noisy_mask, F.interpolate(random_masks, (pred_noisy_mask.size(2), pred_noisy_mask.size(3))).detach().clone())
 
             # total loss
             # loss = mae_loss + lpips_loss + msg_loss + mask_loss 
-            loss = mae_loss + lpips_loss + mask_loss 
+            loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss
 
             # for bit acc
             # pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
@@ -352,6 +360,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean().item()
             # avg_msg_loss = accelerator.gather(msg_loss.repeat(args.train_batch_size)).mean().item()
             avg_mask_loss = accelerator.gather(mask_loss.repeat(args.train_batch_size)).mean().item()
+            avg_noisy_mask_loss = accelerator.gather(noisy_mask_loss.repeat(args.train_batch_size)).mean().item()
             avg_mae_loss = accelerator.gather(mae_loss.repeat(args.train_batch_size)).mean().item()
             avg_lpips_loss = accelerator.gather(lpips_loss.repeat(args.train_batch_size)).mean().item()
             # avg_bit_correct = accelerator.gather(((pred_msgs_bin.eq(msgs_bin.data)).sum()) / (args.train_batch_size * args.num_bits)).mean().item()
@@ -384,6 +393,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                         f"{'Step Loss:'}{avg_loss:6.3f} | "
                         # f"{'Msg Loss:'}{avg_msg_loss:6.3f} | "
                         f"{'Mask Loss:'}{avg_mask_loss:6.3f} | "
+                        f"{'Noisy Mask Loss:'}{avg_noisy_mask_loss:6.3f} | "
                         f"{'LPIPS Loss:'}{avg_lpips_loss:6.3f} | "
                         f"{'MAE Loss:'}{avg_mae_loss:6.3f} | "
                         # f"{'Bit Correct:'}{avg_bit_correct:6.3f}"
@@ -395,7 +405,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                                                cover_images[:args.train_batch_size], 
                                                ((cover_images - decode_images) *10)[:args.train_batch_size],
                                                random_masks.repeat(1, 3, 1, 1)[:args.train_batch_size], 
-                                               F.sigmoid(F.interpolate(pred_mask, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size]],
+                                               F.sigmoid(F.interpolate(pred_mask, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size],
+                                               F.sigmoid(F.interpolate(pred_noisy_mask, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size]],
                                                dim=0).detach().clone()
                     save_image(result_images, os.path.join(args.output_dir, 'images/train', '%s_%s.jpg' % (epoch, step)), normalize=True, scale_each=True, nrow=args.train_batch_size)
 
