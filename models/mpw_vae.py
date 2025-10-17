@@ -147,9 +147,7 @@ class DualAdapter(nn.Module):
         x_amp = self.freq_conv3(inputs)
         x_amp = self.freq_conv4(x_amp)
 
-        x_real = x_amp * torch.cos(x_phase)
-        x_img = x_amp * torch.sin(x_phase)
-        x_freq = torch.complex(x_real, x_img)
+        x_freq = torch.polar(x_amp.float(), x_phase.float())
         x_freq = torch.fft.irfft2(x_freq)  # [B, in_channels, H, W]
 
         return img_feature + x_spatial + x_freq
