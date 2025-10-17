@@ -95,6 +95,47 @@ class MsgAdapter(nn.Module):
         conv2 = self.conv2(conv1) 
         
         return conv2 + img_feature
+    
+class DualAdapter(nn.Module):
+    def __init__(self, in_channels, num_bits):
+        super(DualAdapter, self).__init__()
+        self.num_bits = num_bits
+        
+        # convert the secret message into a feature map with 8 channels
+        self.secret_dense1 = Dense(self.num_bits, 32 * 32, activation='relu') 
+        self.secret_dense2 = Dense(32 * 32, 8 * 32 * 32, activation='relu')
+
+        # spatial branch
+        self.conv1 = Conv2D(in_channels+8, in_channels+8, 3, activation='relu')
+        self.conv2 = zero_module(Conv2D(in_channels+8, in_channels, 3, activation=None))
+
+        # frequency branch
+        self.freq_conv1 = Conv2D(in_channels+8, in_channels+8, 3, activation='relu')
+        self.freq_conv2 = zero_module(Conv2D(in_channels+8, in_channels, 3, activation=None))
+
+    def forward(self, img_feature, secret):
+        secret = 2 * (secret - .5)
+        secret = self.secret_dense1(secret)  
+        secret = self.secret_dense2(secret)  
+        secret = secret.reshape(-1, 8, 32, 32) 
+        scale_factor = img_feature.size(-1) // 32
+        secret_enlarged = nn.Upsample(scale_factor=(scale_factor, scale_factor))(secret)
+        
+        ## two branches: spatial and frequency
+        # spatial branch
+        inputs = torch.cat([secret_enlarged, img_feature], dim=1)
+        conv1 = self.conv1(inputs) 
+        x_spatial = self.conv2(conv1)
+
+        # frequency branch
+        img_freq = torch.fft.rfft2(img_feature, s=inputs.shape[-2:])
+        wm_freq = torch.fft.irfft2(secret_enlarged, s=inputs.shape[-2:])
+        inputs = torch.cat([wm_freq, img_freq], dim=1)
+        freq_conv1 = self.freq_conv1(inputs)
+        x_freq = self.freq_conv2(freq_conv1)
+
+        return img_feature + x_spatial + x_freq
+
 
 
 class MultiplexingWatermarkVAEDecoder(nn.Module):
@@ -170,7 +211,7 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
             prev_output_channel = output_channel
             output_channel = reversed_block_out_channels[i]
 
-            self.msg_adapters.append(MsgAdapter(in_channels=prev_output_channel, num_bits=num_bits)) # add msg adapter to each layer
+            self.msg_adapters.append(DualAdapter(in_channels=prev_output_channel, num_bits=num_bits)) # add msg adapter to each layer
 
             is_final_block = i == len(block_out_channels) - 1
 
