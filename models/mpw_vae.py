@@ -112,6 +112,8 @@ class DualAdapter(nn.Module):
         # frequency branch
         self.freq_conv1 = Conv2D(in_channels+8, in_channels+8, 3, activation='relu')
         self.freq_conv2 = zero_module(Conv2D(in_channels+8, in_channels, 3, activation=None))
+        self.freq_conv3 = Conv2D(in_channels+8, in_channels+8, 3, activation='relu')
+        self.freq_conv4 = zero_module(Conv2D(in_channels+8, in_channels, 3, activation=None))
 
     def forward(self, img_feature, secret):
         secret = 2 * (secret - .5)
@@ -128,11 +130,27 @@ class DualAdapter(nn.Module):
         x_spatial = self.conv2(conv1)
 
         # frequency branch
-        img_freq = torch.fft.rfft2(img_feature, s=inputs.shape[-2:])
-        wm_freq = torch.fft.irfft2(secret_enlarged, s=inputs.shape[-2:])
-        inputs = torch.cat([wm_freq, img_freq], dim=1)
-        freq_conv1 = self.freq_conv1(inputs)
-        x_freq = self.freq_conv2(freq_conv1)
+        img_freq = torch.fft.rfft2(img_feature.float())
+        wm_freq = torch.fft.rfft2(secret_enlarged.float())
+
+        img_amp = torch.abs(img_freq)
+        img_phase = torch.angle(img_freq)
+        wm_amp = torch.abs(wm_freq)
+        wm_phase = torch.angle(wm_freq)
+
+        # [B, in_channels + 8, H, W//2+1]
+        inputs = torch.cat([wm_phase, img_phase], dim=1)
+        x_phase = self.freq_conv1(inputs)
+        x_phase = self.freq_conv2(x_phase)
+
+        inputs = torch.cat([wm_amp, img_amp], dim=1)
+        x_amp = self.freq_conv3(inputs)
+        x_amp = self.freq_conv4(x_amp)
+
+        x_real = x_amp * torch.cos(x_phase)
+        x_img = x_amp * torch.sin(x_phase)
+        x_freq = torch.complex(x_real, x_img)
+        x_freq = torch.fft.irfft2(x_freq)  # [B, in_channels, H, W]
 
         return img_feature + x_spatial + x_freq
 
