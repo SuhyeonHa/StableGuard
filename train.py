@@ -406,6 +406,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                                                cover_images[:args.train_batch_size], 
                                                ((cover_images - decode_images) *10)[:args.train_batch_size],
                                                random_masks.repeat(1, 3, 1, 1)[:args.train_batch_size], 
+                                               tamper_images[:args.train_batch_size],
+                                               tamper_noisy_images[:args.train_batch_size],
                                                F.sigmoid(F.interpolate(pred_mask, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size],
                                                F.sigmoid(F.interpolate(pred_noisy_mask, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size]],
                                                dim=0).detach().clone()
