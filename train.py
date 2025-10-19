@@ -311,7 +311,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 cover_latents = original_vae.encode(cover_images).latent_dist.sample()
                 rand_strength = random.uniform(args.noise_strength[0], args.noise_strength[1])
                 noise = torch.randn_like(cover_latents) * rand_strength
-                noisy_images = original_vae.decode(cover_latents + noise, return_dict=False)[0]
+                noisy_latents = original_vae.post_quant_conv(cover_latents + noise)
+                noisy_images = original_vae.decode(noisy_latents, return_dict=False)[0]
 
             # random splicing
             rand_num = random.random()
