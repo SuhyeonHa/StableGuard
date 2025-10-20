@@ -190,7 +190,7 @@ def main():
     # Load scheduler, tokenizer and models.
     original_vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae")
     mpw_vae_decoder = MultiplexingWatermarkVAEDecoder(num_bits=args.num_bits)
-    moe_gfn = MoEGuidedForensicNet(num_bits=args.num_bits)
+    moe_gfn = MoEGuidedForensicNet()
     lpips = LPIPS(net="vgg") # WatsonDistanceVgg() both Perceptual loss is ok, WatsonDistanceVgg can get better image quality
 
     for name, param in original_vae.decoder.named_parameters():
@@ -336,7 +336,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # Loss
             # similarity loss
             lpips_loss = lpips(cover_images, decode_images.float().detach().clone()).mean() 
-            mae_loss = F.l1_loss(cover_images, decode_images.float().detach().clone())
+            mae_loss = 0.5 * F.l1_loss(cover_images, decode_images.float().detach().clone())
 
             # watermark loss
             # msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
@@ -380,6 +380,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 writer.add_scalar("Loss/total_loss", avg_loss, global_step)
                 # writer.add_scalar("Loss/msg_loss", avg_msg_loss, global_step)
                 writer.add_scalar("Loss/mask_loss", avg_mask_loss, global_step)
+                writer.add_scalar("Loss/noisy_mask_loss", avg_noisy_mask_loss, global_step)
                 writer.add_scalar("Loss/lpips_loss", avg_lpips_loss, global_step)
                 writer.add_scalar("Loss/mse_loss", avg_mae_loss, global_step)
                 if step % 10 == 0: # log
@@ -415,7 +416,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
         global_step += 1
         
         if global_step % args.save_steps == 0:
-            save_path = os.path.join(args.output_dir, f"checkpoint")
+            save_path = os.path.join(args.output_dir, f"checkpoint_{global_step}")
             accelerator.save_state(save_path, safe_serialization=False)
         
         begin = time.perf_counter()

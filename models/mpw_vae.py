@@ -95,6 +95,21 @@ class MsgAdapter(nn.Module):
         conv2 = self.conv2(conv1) 
         
         return conv2 + img_feature
+
+class WatermarkGenerator(nn.Module):
+    def __init__(self, vector_dim: int, latent_h: int, latent_w: int):
+        super().__init__()
+        self.learnable_vector = nn.Parameter(torch.randn(1, vector_dim, 1, 1))
+        self.target_h = latent_h
+        self.target_w = latent_w
+
+    def forward(self, input_tensor: torch.Tensor) -> torch.Tensor:
+        B = input_tensor.shape[0]
+        # [1, vector_dim, 1, 1] -> [B, vector_dim, H, W]
+        watermark = self.learnable_vector.repeat(
+            B, 1, self.target_h, self.target_w
+        )
+        return watermark
     
 class DualAdapter(nn.Module):
     def __init__(self, in_channels, num_bits):
@@ -102,8 +117,10 @@ class DualAdapter(nn.Module):
         self.num_bits = num_bits
         
         # convert the secret message into a feature map with 8 channels
-        self.secret_dense1 = Dense(self.num_bits, 32 * 32, activation='relu') 
-        self.secret_dense2 = Dense(32 * 32, 8 * 32 * 32, activation='relu')
+        # self.secret_dense1 = Dense(self.num_bits, 32 * 32, activation='relu') 
+        # self.secret_dense2 = Dense(32 * 32, 8 * 32 * 32, activation='relu')
+        self.secret_conv1 = Conv2D(num_bits, 8, 1, activation='relu')
+
 
         # spatial branch
         self.conv1 = Conv2D(in_channels+8, in_channels+8, 3, activation='relu')
@@ -116,10 +133,12 @@ class DualAdapter(nn.Module):
         self.freq_conv4 = zero_module(Conv2D(in_channels+8, in_channels, 3, activation=None))
 
     def forward(self, img_feature, secret):
-        secret = 2 * (secret - .5)
-        secret = self.secret_dense1(secret)  
-        secret = self.secret_dense2(secret)  
-        secret = secret.reshape(-1, 8, 32, 32) 
+        # secret = 2 * (secret - .5)
+        # secret = self.secret_dense1(secret)  
+        # secret = self.secret_dense2(secret)  
+        # secret = secret.reshape(-1, 8, 32, 32) 
+
+        secret  = self.secret_conv1(secret)
         scale_factor = img_feature.size(-1) // 32
         secret_enlarged = nn.Upsample(scale_factor=(scale_factor, scale_factor))(secret)
         
@@ -204,6 +223,8 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         self.mid_block = None
         self.up_blocks = nn.ModuleList([])
         self.msg_adapters = nn.ModuleList([])
+        self.num_bits = num_bits
+        self.watermark_generator = WatermarkGenerator(vector_dim=self.num_bits, latent_h=32, latent_w=32)
 
         temb_channels = in_channels if norm_type == "spatial" else None
 
@@ -275,9 +296,11 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         sample = self.mid_block(sample, latent_embeds)
         sample = sample.to(upscale_dtype)
 
+        watermark = self.watermark_generator(sample)
+
         # up
         for up_block, adaptor in zip(self.up_blocks, self.msg_adapters): # add watermark
-            sample = adaptor(sample, msgs)
+            sample = adaptor(sample, watermark)
             sample = up_block(sample, latent_embeds)
         # post-process
         if latent_embeds is None:
