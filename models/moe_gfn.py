@@ -19,93 +19,104 @@ import matplotlib.pyplot as plt
 
 import timm
 
-
-class FeatureExtractor(nn.Module):
+class FPNHead(nn.Module):
     """
-    A Frozen ConvNext model from 'timm' that acts as a feature extractor.
-    This version returns the original, unmodified feature maps from all stages of the ConvNext backbone.
+    A Feature Pyramid Network (FPN) head that aggregates multi-scale features.
     """
-    def __init__(self, model_name='convnext_tiny', in_chans=3):
-        """
-        Initializes the ConvNext feature extractor.
-        Args:
-            model_name (str): The name of the ConvNext model to load from timm.
-            in_chans (int): Number of input channels for the image.
-        """
+    def __init__(self, feature_channels: list, pyramid_channels: int = 256):
         super().__init__()
-        # 1. Load a pre-trained ConvNext model as a feature extractor.
-        #    'features_only=True' returns a list of feature maps from each stage.
-        self.model = timm.create_model(
-            model_name,
-            pretrained=True,
-            features_only=True,
-            in_chans=in_chans
-        )
+        self.pyramid_channels = pyramid_channels
+
+        # Lateral convolutions to process features from the backbone
+        self.lateral_convs = nn.ModuleList()
+        # Output convolutions to refine the fused features
+        self.output_convs = nn.ModuleList()
+
+        for in_channels in feature_channels:
+            self.lateral_convs.append(nn.Conv2d(in_channels, pyramid_channels, kernel_size=1))
+            self.output_convs.append(
+                nn.Sequential(
+                    nn.Conv2d(pyramid_channels, pyramid_channels, kernel_size=3, padding=1, bias=False),
+                    nn.GroupNorm(32, pyramid_channels),
+                    nn.GELU()
+                )
+            )
+
+    def forward(self, features: list) -> list:
+        # features = [f0, f1, f2, f3] (from largest to smallest)
         
-        # 2. Freeze all parameters to use it as a fixed backbone.
+        # Process the deepest feature map first (top of the pyramid)
+        p_prev = self.lateral_convs[-1](features[-1])
+        pyramid_features = [self.output_convs[-1](p_prev)]
+
+        # Iterate from the second deepest to the shallowest
+        for i in range(len(features) - 2, -1, -1):
+            # Upsample the previous pyramid feature
+            p_prev_upsampled = F.interpolate(p_prev, size=features[i].shape[-2:], mode='bilinear', align_corners=False)
+            
+            # Process the current backbone feature with a lateral connection
+            c_curr = self.lateral_convs[i](features[i])
+
+            # Fuse by addition
+            p_prev = p_prev_upsampled + c_curr
+            
+            # Refine and add to the list
+            pyramid_features.append(self.output_convs[i](p_prev))
+            
+        # Return features from shallowest to deepest [p0, p1, p2, p3]
+        return pyramid_features[::-1]
+
+
+class MoEGuidedForensicNet(nn.Module):
+    def __init__(self, model_name='convnext_tiny', in_chans=3, out_chans=1, dec_dim=32):
+        super().__init__()
+        
+        # 1. Backbone
+        self.model = timm.create_model(model_name, pretrained=True, features_only=True, in_chans=in_chans)
         for param in self.model.parameters():
             param.requires_grad = False
+        
+        feature_channels = self.model.feature_info.channels()
+        pyramid_channels = 256 # A common choice for FPN
 
-    def forward(self, x):
-        """
-        Forward pass through the ConvNext model.
-        Returns:
-            latent (torch.Tensor): The deepest feature map from the final stage.
-            residual (list[torch.Tensor]): The list of all raw feature maps from every stage.
-        """
-        # Get the raw feature maps from the model.
+        # 2. FPN Head for feature aggregation
+        self.fpn_head = FPNHead(feature_channels, pyramid_channels)
+        
+        # 3. Final Decoder to produce the mask
+        # FPN outputs a pyramid of features. We combine them for the final prediction.
+        self.decoder = nn.Sequential(
+            nn.Conv2d(pyramid_channels * len(feature_channels), 256, kernel_size=3, padding=1, bias=False),
+            nn.GroupNorm(32, 256),
+            nn.GELU(),
+            nn.Conv2d(256, dec_dim, kernel_size=1),
+        )
+        self.last_layer = nn.Conv2d(dec_dim, out_chans, kernel_size=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        original_size = x.shape[-2:]
+        
+        # Get backbone features
         features = self.model(x)
         
-        # The 'residual' is the list of all feature maps for potential skip connections.
-        residual = features
+        # Get aggregated pyramid features from the FPN head
+        pyramid_features = self.fpn_head(features)
         
-        # The 'latent' is conventionally the deepest feature map from the final stage.
-        latent = features[1]
+        # Upsample all pyramid features to the same size (the largest one) and concatenate
+        p0_size = pyramid_features[0].shape[-2:]
+        fused_features = [pyramid_features[0]]
+        for i in range(1, len(pyramid_features)):
+            fused_features.append(F.interpolate(pyramid_features[i], size=p0_size, mode='bilinear', align_corners=False))
         
-        return latent, residual
-    
-class MoEGuidedForensicNet(nn.Module):
-    def __init__(
-        self,
-        in_channels: int = 3,
-        out_channels: int = 1,
-        num_bits: int=64,
-        down_block_types: Tuple[str] = ("DownEncoderBlock2D","DownEncoderBlock2D","DownEncoderBlock2D","DownEncoderBlock2D"),
-        up_block_types: Tuple[str] = ("UpDecoderBlock2D","UpDecoderBlock2D","UpDecoderBlock2D","UpDecoderBlock2D"),
-        block_out_channels: Tuple[int] = (96,192,384,768),
-        layers_per_block: int = 2,
-        act_fn: str = "silu",
-        norm_num_groups: int = 16,
-    ):
-        super().__init__()
-        self.encoder = FeatureExtractor(model_name='convnext_tiny', in_chans=in_channels)
-
-        # feature map shapes
-        # [B, 3, 224, 224] -> [B, 96, 56, 56], [B, 192, 28, 28], [B, 384, 14, 14], [B, 768, 7, 7]
-        # [B, 3, 384, 384] -> [B, 96, 96, 96], [B, 192, 48, 48], [B, 384, 24, 24], [B, 768, 12, 12]
-
-        # mid
-        # self.mid_block = UNetMidBlock2D(
-        #     in_channels=block_out_channels[-1],
-        #     resnet_eps=1e-6,
-        #     resnet_act_fn=act_fn,
-        #     output_scale_factor=1,
-        #     resnet_time_scale_shift="default",
-        #     attention_head_dim=block_out_channels[-1],
-        #     resnet_groups=norm_num_groups,
-        #     temb_channels=None,
-        #     add_attention=False,
-        # )
-
-        # out for decoder
-        self.decoder = nn.Sequential(nn.Conv2d(block_out_channels[1], block_out_channels[0], 3, padding=1),
-                                 nn.SiLU(),
-                                 nn.Conv2d(block_out_channels[0], out_channels, 3, padding=1))
-
-    def forward(self, x):
-        latent, _ = self.encoder(x)
-        mask = self.decoder(latent)
-        return mask
+        fused_features = torch.cat(fused_features, dim=1)
+        
+        # Pass through the final decoder
+        decoded_features = self.decoder(fused_features)
+        
+        # Upsample to original image size and make final prediction
+        upsampled_features = F.interpolate(decoded_features, size=original_size, mode='bilinear', align_corners=False)
+        prediction = self.last_layer(upsampled_features)
+        
+        return prediction
 
 # class MoEGuidedForensicNet(nn.Module):
 #     """
