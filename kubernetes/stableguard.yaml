@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-freqloc-tamper-dec12
+  name: suhyeon-train-freqloc-weights
 spec:
   template:
     spec:

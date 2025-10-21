@@ -335,8 +335,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # Loss
             # similarity loss
-            lpips_loss = lpips(cover_images, decode_images.float().detach().clone()).mean() 
-            mae_loss = 0.5 * F.l1_loss(cover_images, decode_images.float().detach().clone())
+            lpips_loss = 0.5 * lpips(cover_images, decode_images.float().detach().clone()).mean() 
+            mae_loss = 0.25 * F.l1_loss(cover_images, decode_images.float().detach().clone())
 
             # watermark loss
             # msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
@@ -501,7 +501,8 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                                    tamper_images[:args.train_batch_size],
                                    tamper_noisy_images[:args.train_batch_size],
                                    random_masks.repeat(1, 3, 1, 1)[:args.train_batch_size], 
-                                   F.sigmoid(F.interpolate(pred_mask, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size]],
+                                   F.sigmoid(F.interpolate(pred_mask, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size],
+                                   F.sigmoid(F.interpolate(pred_noisy_mask, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size]],
                                    dim=0).detach().clone()
         save_image(result_images, os.path.join(args.output_dir, 'images/test', '%s.jpg' % epoch), normalize=True, scale_each=True, nrow=args.train_batch_size)   
 

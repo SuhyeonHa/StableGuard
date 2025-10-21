@@ -19,81 +19,167 @@ import matplotlib.pyplot as plt
 
 import timm
 
-import timm
 
-class MoEGuidedForensicNet(nn.Module):
+class FeatureExtractor(nn.Module):
     """
-    Fuses the 2nd and 3rd feature maps (features[1], features[2]) from ConvNext
-    and produces a full-resolution, pixel-wise prediction.
+    A Frozen ConvNext model from 'timm' that acts as a feature extractor.
+    This version returns the original, unmodified feature maps from all stages of the ConvNext backbone.
     """
-    def __init__(self, model_name='convnext_tiny', in_chans=3, out_chans=1, dec_dim=32):
+    def __init__(self, model_name='convnext_tiny', in_chans=3):
+        """
+        Initializes the ConvNext feature extractor.
+        Args:
+            model_name (str): The name of the ConvNext model to load from timm.
+            in_chans (int): Number of input channels for the image.
+        """
         super().__init__()
-
-        # 1. Load a pre-trained ConvNext backbone (frozen).
+        # 1. Load a pre-trained ConvNext model as a feature extractor.
+        #    'features_only=True' returns a list of feature maps from each stage.
         self.model = timm.create_model(
             model_name,
             pretrained=True,
             features_only=True,
             in_chans=in_chans
         )
+        
+        # 2. Freeze all parameters to use it as a fixed backbone.
         for param in self.model.parameters():
             param.requires_grad = False
 
-        feature_info = self.model.feature_info.channels()
-        f1_channels = feature_info[1] # e.g., 192 for convnext_tiny
-        f2_channels = feature_info[2] # e.g., 384 for convnext_tiny
-
-        # 2. Layer to process features[2] to match features[1].
-        # Upsamples f2 by 2x (e.g., H/16 -> H/8) and matches channel count of f1.
-        self.fuse_layer = nn.ConvTranspose2d(f2_channels, f1_channels, kernel_size=2, stride=2)
-
-        # Bottleneck layer to fuse concatenated features (f1 + upsampled f2).
-        self.bottleneck_conv = nn.Conv2d(f1_channels * 2, f1_channels, kernel_size=1, bias=False)
-
-        # 3. Upsampler module redesigned for 8x upsampling (H/8 -> H).
-        self.decoder = nn.Sequential(
-            # Input: [B, f1_channels, H/8, W/8]
-            nn.Conv2d(f1_channels, f1_channels, kernel_size=3, padding=1),
-            nn.GELU(),
-            
-            # Upsample 2x: H/8 -> H/4
-            nn.ConvTranspose2d(f1_channels, f1_channels // 2, kernel_size=2, stride=2),
-            nn.GELU(),
-            
-            # Upsample 2x: H/4 -> H/2
-            nn.ConvTranspose2d(f1_channels // 2, f1_channels // 4, kernel_size=2, stride=2),
-            nn.GELU(),
-
-            # Upsample 2x: H/2 -> H
-            nn.ConvTranspose2d(f1_channels // 4, dec_dim, kernel_size=2, stride=2),
-            nn.GELU(),
-        )
-        
-        # 4. Final 1x1 Conv layer for pixel-wise prediction.
-        self.last_layer = nn.Conv2d(dec_dim, out_chans, kernel_size=1, bias=True)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        self.model.eval()
-        original_size = x.shape[-2:]
-
+    def forward(self, x):
+        """
+        Forward pass through the ConvNext model.
+        Returns:
+            latent (torch.Tensor): The deepest feature map from the final stage.
+            residual (list[torch.Tensor]): The list of all raw feature maps from every stage.
+        """
+        # Get the raw feature maps from the model.
         features = self.model(x)
-        f1 = features[1] # Mid-level features (e.g., [B, 192, H/8, W/8])
-        f2 = features[2] # High-level features (e.g., [B, 384, H/16, W/16])
-        # ---------------------------------------------------
-
-        f2_upsampled = self.fuse_layer(f2)
         
-        concatenated_features = torch.cat([f1, f2_upsampled], dim=1)
-
-        fused_features = self.bottleneck_conv(concatenated_features)
-
-        upsampled_features = self.decoder(fused_features)
-
-        prediction = self.last_layer(upsampled_features)
+        # The 'residual' is the list of all feature maps for potential skip connections.
+        residual = features
         
-        prediction = F.interpolate(prediction, size=original_size, mode='bilinear', align_corners=False)
+        # The 'latent' is conventionally the deepest feature map from the final stage.
+        latent = features[1]
         
-        return prediction
+        return latent, residual
+    
+class MoEGuidedForensicNet(nn.Module):
+    def __init__(
+        self,
+        in_channels: int = 3,
+        out_channels: int = 1,
+        num_bits: int=64,
+        down_block_types: Tuple[str] = ("DownEncoderBlock2D","DownEncoderBlock2D","DownEncoderBlock2D","DownEncoderBlock2D"),
+        up_block_types: Tuple[str] = ("UpDecoderBlock2D","UpDecoderBlock2D","UpDecoderBlock2D","UpDecoderBlock2D"),
+        block_out_channels: Tuple[int] = (96,192,384,768),
+        layers_per_block: int = 2,
+        act_fn: str = "silu",
+        norm_num_groups: int = 16,
+    ):
+        super().__init__()
+        self.encoder = FeatureExtractor(model_name='convnext_tiny', in_chans=in_channels)
+
+        # feature map shapes
+        # [B, 3, 224, 224] -> [B, 96, 56, 56], [B, 192, 28, 28], [B, 384, 14, 14], [B, 768, 7, 7]
+        # [B, 3, 384, 384] -> [B, 96, 96, 96], [B, 192, 48, 48], [B, 384, 24, 24], [B, 768, 12, 12]
+
+        # mid
+        # self.mid_block = UNetMidBlock2D(
+        #     in_channels=block_out_channels[-1],
+        #     resnet_eps=1e-6,
+        #     resnet_act_fn=act_fn,
+        #     output_scale_factor=1,
+        #     resnet_time_scale_shift="default",
+        #     attention_head_dim=block_out_channels[-1],
+        #     resnet_groups=norm_num_groups,
+        #     temb_channels=None,
+        #     add_attention=False,
+        # )
+
+        # out for decoder
+        self.decoder = nn.Sequential(nn.Conv2d(block_out_channels[1], block_out_channels[0], 3, padding=1),
+                                 nn.SiLU(),
+                                 nn.Conv2d(block_out_channels[0], out_channels, 3, padding=1))
+
+    def forward(self, x):
+        latent, _ = self.encoder(x)
+        mask = self.decoder(latent)
+        return mask
+
+# class MoEGuidedForensicNet(nn.Module):
+#     """
+#     Fuses the 2nd and 3rd feature maps (features[1], features[2]) from ConvNext
+#     and produces a full-resolution, pixel-wise prediction.
+#     """
+#     def __init__(self, model_name='convnext_tiny', in_chans=3, out_chans=1, dec_dim=32):
+#         super().__init__()
+
+#         # 1. Load a pre-trained ConvNext backbone (frozen).
+#         self.model = timm.create_model(
+#             model_name,
+#             pretrained=True,
+#             features_only=True,
+#             in_chans=in_chans
+#         )
+#         for param in self.model.parameters():
+#             param.requires_grad = False
+
+#         feature_info = self.model.feature_info.channels()
+#         f1_channels = feature_info[1] # e.g., 192 for convnext_tiny
+#         f2_channels = feature_info[2] # e.g., 384 for convnext_tiny
+
+#         # 2. Layer to process features[2] to match features[1].
+#         # Upsamples f2 by 2x (e.g., H/16 -> H/8) and matches channel count of f1.
+#         self.fuse_layer = nn.ConvTranspose2d(f2_channels, f1_channels, kernel_size=2, stride=2)
+
+#         # Bottleneck layer to fuse concatenated features (f1 + upsampled f2).
+#         self.bottleneck_conv = nn.Conv2d(f1_channels * 2, f1_channels, kernel_size=1, bias=False)
+
+#         # 3. Upsampler module redesigned for 8x upsampling (H/8 -> H).
+#         self.decoder = nn.Sequential(
+#             # Input: [B, f1_channels, H/8, W/8]
+#             nn.Conv2d(f1_channels, f1_channels, kernel_size=3, padding=1),
+#             nn.GELU(),
+            
+#             # Upsample 2x: H/8 -> H/4
+#             nn.ConvTranspose2d(f1_channels, f1_channels // 2, kernel_size=2, stride=2),
+#             nn.GELU(),
+            
+#             # Upsample 2x: H/4 -> H/2
+#             nn.ConvTranspose2d(f1_channels // 2, f1_channels // 4, kernel_size=2, stride=2),
+#             nn.GELU(),
+
+#             # Upsample 2x: H/2 -> H
+#             nn.ConvTranspose2d(f1_channels // 4, dec_dim, kernel_size=2, stride=2),
+#             nn.GELU(),
+#         )
+        
+#         # 4. Final 1x1 Conv layer for pixel-wise prediction.
+#         self.last_layer = nn.Conv2d(dec_dim, out_chans, kernel_size=1, bias=True)
+
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:
+#         self.model.eval()
+#         original_size = x.shape[-2:]
+
+#         features = self.model(x)
+#         f1 = features[1] # Mid-level features (e.g., [B, 192, H/8, W/8])
+#         f2 = features[2] # High-level features (e.g., [B, 384, H/16, W/16])
+#         # ---------------------------------------------------
+
+#         f2_upsampled = self.fuse_layer(f2)
+        
+#         concatenated_features = torch.cat([f1, f2_upsampled], dim=1)
+
+#         fused_features = self.bottleneck_conv(concatenated_features)
+
+#         upsampled_features = self.decoder(fused_features)
+
+#         prediction = self.last_layer(upsampled_features)
+        
+#         prediction = F.interpolate(prediction, size=original_size, mode='bilinear', align_corners=False)
+        
+#         return prediction
 
 
 # def autopad(k, p=None, d=1):  # kernel, padding, dilation
