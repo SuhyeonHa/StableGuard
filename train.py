@@ -349,8 +349,11 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                         0.2 * dice_loss(pred_noisy_mask, F.interpolate(random_masks, (pred_noisy_mask.size(2), pred_noisy_mask.size(3))).detach().clone())
 
             # total loss
-            # loss = mae_loss + lpips_loss + msg_loss + mask_loss 
-            loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss
+            # loss = mae_loss + lpips_loss + msg_loss + mask_loss
+            if global_step < 1000:
+                loss = mae_loss + lpips_loss + mask_loss
+            else:
+                loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss
 
             # for bit acc
             # pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
