@@ -316,15 +316,18 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # random splicing
             rand_num = random.random()
 
-            if rand_num <= 0.5:
-                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
-            elif rand_num > 0.5:
-                tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
+            # if rand_num <= 0.5:
+            #     tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+            # elif rand_num > 0.5:
+            #     tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
 
-            if rand_num <= 0.5:
-                tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
-            elif rand_num > 0.5:
-                tamper_noisy_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
+            # if rand_num <= 0.5:
+            #     tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
+            # elif rand_num > 0.5:
+            #     tamper_noisy_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
+
+            tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+            tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
 
             # add_quantization
             tamper_images = round_pixel(tamper_images)
@@ -335,8 +338,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # Loss
             # similarity loss
-            lpips_loss = 0.5 * lpips(cover_images, decode_images.float().detach().clone()).mean() 
-            mae_loss = 0.25 * F.l1_loss(cover_images, decode_images.float().detach().clone())
+            lpips_loss = lpips(cover_images, decode_images.float().detach().clone()).mean() 
+            mae_loss = 0.5 * F.l1_loss(cover_images, decode_images.float().detach().clone())
 
             # watermark loss
             # msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
@@ -350,10 +353,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # total loss
             # loss = mae_loss + lpips_loss + msg_loss + mask_loss
-            if global_step < 1000:
-                loss = mae_loss + lpips_loss + mask_loss
-            else:
-                loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss
+            loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss
 
             # for bit acc
             # pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
