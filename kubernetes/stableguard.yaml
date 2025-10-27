@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-freqloc-decode-only
+  name: suhyeon-train-freqloc-invert-mask
 spec:
   template:
     spec:
