@@ -267,7 +267,7 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
             prev_output_channel = output_channel
             output_channel = reversed_block_out_channels[i]
 
-            self.msg_adapters.append(FreqAdapter(c=prev_output_channel, h=latent_h, w=latent_w)) # add msg adapter to each layer
+            self.msg_adapters.append(FreqAdapter(c=prev_output_channel, h=latent_h, w=latent_w, num_bits=num_bits)) # add msg adapter to each layer
 
             is_final_block = i == len(block_out_channels) - 1
 
