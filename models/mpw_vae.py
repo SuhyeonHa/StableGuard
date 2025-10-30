@@ -177,16 +177,16 @@ class FreqAdapter(nn.Module):
         super(FreqAdapter, self).__init__()
         # self.watermark = nn.Parameter(torch.randn(1, c, h, (w // 2) + 1))
         self.num_bits = num_bits
-        # self.watermark = nn.Parameter(torch.randn(1, c, h, w))
-        self.secret_dense1 = Dense(self.num_bits, h * w, activation='relu') 
-        self.secret_dense2 = Dense(h * w, c * h * w, activation='relu')
+        self.watermark = nn.Parameter(torch.randn(1, c, h, w))
+        # self.secret_dense1 = Dense(self.num_bits, h * w, activation='relu') 
+        # self.secret_dense2 = Dense(h * w, c * h * w, activation='relu')
 
-    def forward(self, img_feature, msgs):
+    def forward(self, img_feature):
         # img_freq = torch.fft.rfft2(img_feature.float())
-        watermark = self.secret_dense1(msgs)
-        watermark = self.secret_dense2(watermark)
-        watermark = watermark.reshape(-1, img_feature.size(1), img_feature.size(2), img_feature.size(3))
-        watermarked = img_feature + watermark
+        # watermark = self.secret_dense1(msgs)
+        # watermark = self.secret_dense2(watermark)
+        # watermark = watermark.reshape(-1, img_feature.size(1), img_feature.size(2), img_feature.size(3))
+        watermarked = img_feature + self.watermark
         # watermarked = torch.fft.irfft2(wm_freq, dim=(-2, -1)).real
         return watermarked
 
@@ -307,7 +307,6 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
     def forward(
         self,
         sample: torch.FloatTensor,
-        msgs: Optional[torch.FloatTensor] = None,
         latent_embeds: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         r"""The forward method of the `Decoder` class."""
@@ -322,7 +321,7 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         # up
         for up_block, adapter in zip(self.up_blocks, self.msg_adapters): # add watermark
         # for up_block in self.up_blocks:
-            sample = adapter(sample, msgs)
+            sample = adapter(sample)
             sample = up_block(sample, latent_embeds)
         # post-process
         if latent_embeds is None:

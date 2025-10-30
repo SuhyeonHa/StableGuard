@@ -193,11 +193,11 @@ def main():
     moe_gfn = MoEGuidedForensicNet(bit_chans=args.num_bits)
     lpips = LPIPS(net="vgg") # WatsonDistanceVgg() both Perceptual loss is ok, WatsonDistanceVgg can get better image quality
 
-    for name, param in original_vae.decoder.named_parameters():
-        if name in mpw_vae_decoder.state_dict():
-            mpw_vae_decoder.state_dict()[name].copy_(param.detach().clone())
-        else:
-            print(name)
+    # for name, param in original_vae.decoder.named_parameters():
+    #     if name in mpw_vae_decoder.state_dict():
+    #         mpw_vae_decoder.state_dict()[name].copy_(param.detach().clone())
+    #     else:
+    #         print(name)
 
     # freeze parameters of models to save more memory
     original_vae.requires_grad_(False)
@@ -306,7 +306,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 random_masks = torch.stack(random_masks_, dim=0)
 
             # watermarked image
-            cover_images = mpw_vae_decoder(latents, msgs=msgs)
+            cover_images = mpw_vae_decoder(latents,)
 
             with torch.no_grad():
                 cover_latents = original_vae.encode(cover_images).latent_dist.sample()
@@ -343,8 +343,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # Loss
             # similarity loss
-            lpips_loss = 0.1 * lpips(cover_images, images.float().detach().clone()).mean() 
-            mae_loss = 0.1 * F.l1_loss(cover_images, images.float().detach().clone())
+            lpips_loss = lpips(cover_images, images.float().detach().clone()).mean() # 0.1
+            mae_loss = F.l1_loss(cover_images, images.float().detach().clone()) # 0.1
 
             # watermark loss
             msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
@@ -363,23 +363,23 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             #     loss = mae_loss + lpips_loss + mask_loss
             # else:
             #     loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss
-            loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss + msg_loss + noisy_msg_loss
+            loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss
 
             # for bit acc
-            pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
-            msgs_bin = torch.round(torch.sigmoid(msgs.squeeze(1)))
-            pred_noisy_msgs_bin = torch.round(torch.sigmoid(pred_noisy_msgs))
+            # pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
+            # msgs_bin = torch.round(torch.sigmoid(msgs.squeeze(1)))
+            # pred_noisy_msgs_bin = torch.round(torch.sigmoid(pred_noisy_msgs))
 
             # Gather the losses across all processes for logging (if we use distributed training).
             avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean().item()
-            avg_msg_loss = accelerator.gather(msg_loss.repeat(args.train_batch_size)).mean().item()
-            avg_noisy_msg_loss = accelerator.gather(noisy_msg_loss.repeat(args.train_batch_size)).mean().item()
+            # avg_msg_loss = accelerator.gather(msg_loss.repeat(args.train_batch_size)).mean().item()
+            # avg_noisy_msg_loss = accelerator.gather(noisy_msg_loss.repeat(args.train_batch_size)).mean().item()
             avg_mask_loss = accelerator.gather(mask_loss.repeat(args.train_batch_size)).mean().item()
             avg_noisy_mask_loss = accelerator.gather(noisy_mask_loss.repeat(args.train_batch_size)).mean().item()
             avg_mae_loss = accelerator.gather(mae_loss.repeat(args.train_batch_size)).mean().item()
             avg_lpips_loss = accelerator.gather(lpips_loss.repeat(args.train_batch_size)).mean().item()
-            avg_bit_correct = accelerator.gather(((pred_msgs_bin.eq(msgs_bin.data)).sum()) / (args.train_batch_size * args.num_bits)).mean().item()
-            avg_noisy_bit_correct = accelerator.gather(((pred_noisy_msgs_bin.eq(msgs_bin.data)).sum()) / (args.train_batch_size * args.num_bits)).mean().item()
+            # avg_bit_correct = accelerator.gather(((pred_msgs_bin.eq(msgs_bin.data)).sum()) / (args.train_batch_size * args.num_bits)).mean().item()
+            # avg_noisy_bit_correct = accelerator.gather(((pred_noisy_msgs_bin.eq(msgs_bin.data)).sum()) / (args.train_batch_size * args.num_bits)).mean().item()
             
             accelerator.backward(loss)
 
@@ -392,11 +392,11 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             if accelerator.is_main_process:
                 writer.add_scalar("LR", lr, global_step)
-                writer.add_scalar("Loss/bit_correct", avg_bit_correct, global_step)
-                writer.add_scalar("Loss/noisy_bit_correct", avg_noisy_bit_correct, global_step)
+                # writer.add_scalar("Loss/bit_correct", avg_bit_correct, global_step)
+                # writer.add_scalar("Loss/noisy_bit_correct", avg_noisy_bit_correct, global_step)
                 writer.add_scalar("Loss/total_loss", avg_loss, global_step)
-                writer.add_scalar("Loss/msg_loss", avg_msg_loss, global_step)
-                writer.add_scalar("Loss/msg_loss", avg_noisy_msg_loss, global_step)
+                # writer.add_scalar("Loss/msg_loss", avg_msg_loss, global_step)
+                # writer.add_scalar("Loss/noisy_msg_loss", avg_noisy_msg_loss, global_step)
                 writer.add_scalar("Loss/mask_loss", avg_mask_loss, global_step)
                 writer.add_scalar("Loss/noisy_mask_loss", avg_noisy_mask_loss, global_step)
                 writer.add_scalar("Loss/lpips_loss", avg_lpips_loss, global_step)
@@ -410,14 +410,14 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                         f"{'Step Time:'}{step_time:6.3f} | "
                         f"{'LR:'}{lr:6.6f} | "
                         f"{'Step Loss:'}{avg_loss:6.3f} | "
-                        f"{'Msg Loss:'}{avg_msg_loss:6.3f} | "
-                        f"{'Loisy Msg Loss:'}{avg_noisy_msg_loss:6.3f} | "
+                        # f"{'Msg Loss:'}{avg_msg_loss:6.3f} | "
+                        # f"{'Loisy Msg Loss:'}{avg_noisy_msg_loss:6.3f} | "
                         f"{'Mask Loss:'}{avg_mask_loss:6.3f} | "
                         f"{'Noisy Mask Loss:'}{avg_noisy_mask_loss:6.3f} | "
                         f"{'LPIPS Loss:'}{avg_lpips_loss:6.3f} | "
                         f"{'MAE Loss:'}{avg_mae_loss:6.3f} | "
-                        f"{'Bit Correct:'}{avg_bit_correct:6.3f}"
-                        f"{'Noisy Bit Correct:'}{avg_noisy_bit_correct:6.3f}"
+                        # f"{'Bit Correct:'}{avg_bit_correct:6.3f}"
+                        # f"{'Noisy Bit Correct:'}{avg_noisy_bit_correct:6.3f}"
                     )
                     print(msg)
                     logger.info(msg)
@@ -460,10 +460,10 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                 latents = original_vae.encode(images).latent_dist.sample()
                 decode_images = original_vae.decode(latents, return_dict=False)[0]
                 latents = original_vae.post_quant_conv(latents) # to process for another model (not vae)
-                phi = torch.empty(latents.size(0), args.num_bits).uniform_(0,1)
-                msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
+                # phi = torch.empty(latents.size(0), args.num_bits).uniform_(0,1)
+                # msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
 
-            cover_images = mpw_vae_decoder(latents, msgs=msgs)
+            cover_images = mpw_vae_decoder(latents)
 
             with torch.no_grad():
                 cover_latents = original_vae.encode(cover_images).latent_dist.sample()
@@ -490,10 +490,10 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             pred_decode_noisy, msg_decode_noisy = moe_gfn(decode_noisy.to(dtype=weight_dtype))
             pred_orig_noisy, msg_orig_noisy = moe_gfn(orig_noisy.to(dtype=weight_dtype))
 
-            msg_loss = F.binary_cross_entropy_with_logits(msg_decode_cover, msgs.float().detach().clone()) + \
-                        F.binary_cross_entropy_with_logits(msg_orig_cover, msgs.float().detach().clone()) + \
-                        F.binary_cross_entropy_with_logits(msg_decode_noisy, msgs.float().detach().clone()) + \
-                        F.binary_cross_entropy_with_logits(msg_orig_noisy, msgs.float().detach().clone())
+            # msg_loss = F.binary_cross_entropy_with_logits(msg_decode_cover, msgs.float().detach().clone()) + \
+            #             F.binary_cross_entropy_with_logits(msg_orig_cover, msgs.float().detach().clone()) + \
+            #             F.binary_cross_entropy_with_logits(msg_decode_noisy, msgs.float().detach().clone()) + \
+            #             F.binary_cross_entropy_with_logits(msg_orig_noisy, msgs.float().detach().clone())
             mask_loss = 0.8 * weighted_binary_cross_entropy(pred_decode_cover, F.interpolate(random_masks, (pred_decode_cover.size(2), pred_decode_cover.size(3))).detach().clone()) + \
                         0.2 * dice_loss(pred_decode_cover, F.interpolate(random_masks, (pred_decode_cover.size(2), pred_decode_cover.size(3))).detach().clone()) + \
                         0.8 * weighted_binary_cross_entropy(pred_orig_cover, F.interpolate(random_masks, (pred_orig_cover.size(2), pred_orig_cover.size(3))).detach().clone()) + \
@@ -504,20 +504,20 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                         0.2 * dice_loss(pred_orig_noisy, F.interpolate(random_masks, (pred_orig_noisy.size(2), pred_orig_noisy.size(3))).detach().clone())
             lpips_loss = lpips(cover_images, images.float().detach().clone()).mean() 
 
-            pred_msgs_decode_cover_bin = torch.round(torch.sigmoid(msg_decode_cover))
-            pred_msgs_orig_cover_bin = torch.round(torch.sigmoid(msg_orig_cover))
-            pred_msgs_decode_noisy_bin = torch.round(torch.sigmoid(msg_decode_noisy))
-            pred_msgs_orig_noisy_bin = torch.round(torch.sigmoid(msg_orig_noisy))
-            msgs_bin = torch.round(torch.sigmoid(msgs.squeeze(1)))
+            # pred_msgs_decode_cover_bin = torch.round(torch.sigmoid(msg_decode_cover))
+            # pred_msgs_orig_cover_bin = torch.round(torch.sigmoid(msg_orig_cover))
+            # pred_msgs_decode_noisy_bin = torch.round(torch.sigmoid(msg_decode_noisy))
+            # pred_msgs_orig_noisy_bin = torch.round(torch.sigmoid(msg_orig_noisy))
+            # msgs_bin = torch.round(torch.sigmoid(msgs.squeeze(1)))
             # Gather the losses across all processes for logging (if we use distributed training).
-            avg_msg_loss += accelerator.gather(msg_loss.repeat(args.train_batch_size)).mean().item()
+            # avg_msg_loss += accelerator.gather(msg_loss.repeat(args.train_batch_size)).mean().item()
             avg_mask_loss += accelerator.gather(mask_loss.repeat(args.train_batch_size)).mean().item()
             avg_noisy_mask_loss = accelerator.gather(noisy_mask_loss.repeat(args.train_batch_size)).mean().item()
             avg_lpips_loss += accelerator.gather(lpips_loss.repeat(args.train_batch_size)).mean().item()
-            avg_bit_correct += accelerator.gather((pred_msgs_decode_cover_bin.eq(msgs_bin.data).sum()) / (args.train_batch_size * args.num_bits)+ \
-                                                  (pred_msgs_decode_cover_bin.eq(pred_msgs_orig_cover_bin.data).sum()) / (args.train_batch_size * args.num_bits)+ \
-                                                  (pred_msgs_decode_cover_bin.eq(pred_msgs_decode_noisy_bin.data).sum()) / (args.train_batch_size * args.num_bits)+ \
-                                                  (pred_msgs_decode_cover_bin.eq(pred_msgs_orig_noisy_bin.data).sum()) / (args.train_batch_size * args.num_bits)).mean().item()
+            # avg_bit_correct += accelerator.gather((pred_msgs_decode_cover_bin.eq(msgs_bin.data).sum()) / (args.train_batch_size * args.num_bits)+ \
+            #                                       (pred_msgs_decode_cover_bin.eq(pred_msgs_orig_cover_bin.data).sum()) / (args.train_batch_size * args.num_bits)+ \
+            #                                       (pred_msgs_decode_cover_bin.eq(pred_msgs_decode_noisy_bin.data).sum()) / (args.train_batch_size * args.num_bits)+ \
+            #                                       (pred_msgs_decode_cover_bin.eq(pred_msgs_orig_noisy_bin.data).sum()) / (args.train_batch_size * args.num_bits)).mean().item()
 
     avg_msg_loss = avg_msg_loss / (step + 1)
     avg_mask_loss = avg_mask_loss / (step + 1)
