@@ -336,10 +336,10 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # add_quantization
             tamper_images = round_pixel(tamper_images)
-            pred_mask, pred_msgs = moe_gfn(tamper_images.to(dtype=weight_dtype))
+            pred_mask = moe_gfn(tamper_images.to(dtype=weight_dtype))
 
             tamper_noisy_images = round_pixel(tamper_noisy_images)
-            pred_noisy_mask, pred_noisy_msgs = moe_gfn(tamper_noisy_images.to(dtype=weight_dtype))
+            pred_noisy_mask = moe_gfn(tamper_noisy_images.to(dtype=weight_dtype))
 
             # Loss
             # similarity loss
@@ -347,8 +347,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             mae_loss = F.l1_loss(cover_images, images.float().detach().clone()) # 0.1
 
             # watermark loss
-            msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
-            noisy_msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
+            # msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
+            # noisy_msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
 
             # tamper loss
             mask_loss = 0.5 * weighted_binary_cross_entropy(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone()) + \
