@@ -8,7 +8,7 @@
   --dataloader_num_workers=4 \
   --learning_rate=1e-4 \
   --weight_decay=1e-2 \
-  --output_dir="/mnt/nas5/suhyeon/projects/freqloc-ldm/exp15-baseline-train-decoder-freq" \
+  --output_dir="/mnt/nas5/suhyeon/projects/freqloc-ldm/exp16-baseline-train-decoder-bit" \
   --save_steps=1000 \
   --num_train_epochs=10 \
   --num_bits=48 \

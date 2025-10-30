@@ -68,7 +68,7 @@ class FPNHead(nn.Module):
 
 
 class MoEGuidedForensicNet(nn.Module):
-    def __init__(self, model_name='convnext_tiny', in_chans=3, out_chans=1, dec_dim=32):
+    def __init__(self, model_name='convnext_tiny', in_chans=3, out_chans=1, dec_dim=32, bit_chans=48):
         super().__init__()
         
         # 1. Backbone
@@ -90,7 +90,8 @@ class MoEGuidedForensicNet(nn.Module):
             nn.GELU(),
             nn.Conv2d(256, dec_dim, kernel_size=1),
         )
-        self.last_layer = nn.Conv2d(dec_dim, out_chans, kernel_size=1)
+        self.mask_head = nn.Conv2d(dec_dim, out_chans, kernel_size=1)
+        self.bit_head = nn.Cond2d(dec_dim, bit_chans, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         original_size = x.shape[-2:]
@@ -114,9 +115,10 @@ class MoEGuidedForensicNet(nn.Module):
         
         # Upsample to original image size and make final prediction
         upsampled_features = F.interpolate(decoded_features, size=original_size, mode='bilinear', align_corners=False)
-        prediction = self.last_layer(upsampled_features)
+        prediction = self.mask_head(upsampled_features)
+        bit = self.bit_head(upsampled_features)
         
-        return prediction
+        return prediction, bit
 
 # class MoEGuidedForensicNet(nn.Module):
 #     """

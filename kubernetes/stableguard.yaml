@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-freqloc-decoder-freq
+  name: suhyeon-train-freqloc-decoder-bit
 spec:
   template:
     spec:
