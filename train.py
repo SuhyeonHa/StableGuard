@@ -344,7 +344,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # Loss
             # similarity loss
             lpips_loss = lpips(cover_images, images.float().detach().clone()).mean() 
-            mae_loss = 0.5 * F.l1_loss(cover_images, images.float().detach().clone())
+            mae_loss = F.l1_loss(cover_images, images.float().detach().clone())
 
             # watermark loss
             # msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
@@ -414,9 +414,9 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                     print(msg)
                     logger.info(msg)
                 if step % 100 == 0: # visualization
-                    result_images = torch.cat([decode_images[:args.train_batch_size], 
+                    result_images = torch.cat([images[:args.train_batch_size], 
                                                cover_images[:args.train_batch_size], 
-                                               ((cover_images - decode_images) *10)[:args.train_batch_size],
+                                               ((cover_images - images) *10)[:args.train_batch_size],
                                                random_masks.repeat(1, 3, 1, 1)[:args.train_batch_size], 
                                                tamper_images[:args.train_batch_size],
                                                tamper_noisy_images[:args.train_batch_size],
@@ -491,7 +491,7 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                         0.2 * dice_loss(pred_decode_noisy, F.interpolate(random_masks, (pred_decode_noisy.size(2), pred_decode_noisy.size(3))).detach().clone()) + \
                         0.8 * weighted_binary_cross_entropy(pred_orig_noisy, F.interpolate(random_masks, (pred_orig_noisy.size(2), pred_orig_noisy.size(3))).detach().clone()) + \
                         0.2 * dice_loss(pred_orig_noisy, F.interpolate(random_masks, (pred_orig_noisy.size(2), pred_orig_noisy.size(3))).detach().clone())
-            lpips_loss = lpips(cover_images, decode_images.float().detach().clone()).mean() 
+            lpips_loss = lpips(cover_images, images.float().detach().clone()).mean() 
 
             # pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
             # msgs_bin = torch.round(torch.sigmoid(msgs.squeeze(1)))
@@ -515,9 +515,9 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                 epoch, avg_msg_loss, avg_mask_loss, avg_noisy_mask_loss, avg_lpips_loss, avg_bit_correct)
         print(msg)
         logger.info(msg)
-        result_images = torch.cat([decode_images[:args.train_batch_size], 
+        result_images = torch.cat([images[:args.train_batch_size], 
                                    cover_images[:args.train_batch_size], 
-                                   ((cover_images - decode_images) *10)[:args.train_batch_size],
+                                   ((cover_images - images) *10)[:args.train_batch_size],
                                    decode_cover[:args.train_batch_size],
                                    orig_cover[:args.train_batch_size],
                                    decode_noisy[:args.train_batch_size],
