@@ -201,10 +201,11 @@ def main():
 
     # freeze parameters of models to save more memory
     original_vae.requires_grad_(False)
-    mpw_vae_decoder.requires_grad_(False)
+    mpw_vae_decoder.requires_grad_(True) # training all decoder params
+    # mpw_vae_decoder.requires_grad_(False)
 
-    for param in mpw_vae_decoder.msg_adapters.parameters():
-        param.requires_grad = True
+    # for param in mpw_vae_decoder.msg_adapters.parameters():
+    #     param.requires_grad = True
 
     weight_dtype = torch.float32
     if accelerator.mixed_precision == "fp16": # may result in ``Nan`` error 
@@ -305,7 +306,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 random_masks = torch.stack(random_masks_, dim=0)
 
             # watermarked image
-            cover_images = mpw_vae_decoder(latents, msgs=msgs)
+            cover_images = mpw_vae_decoder(latents)
 
             with torch.no_grad():
                 cover_latents = original_vae.encode(cover_images).latent_dist.sample()
@@ -315,20 +316,23 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # random splicing
             rand_num = random.random()
+            
+            tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+            tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
 
-            if rand_num <= 0.5:
-                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
-                # tamper_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * cover_images # invert
-            elif rand_num > 0.5:
-                tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
-                # tamper_images = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
+            # if rand_num <= 0.5:
+            #     tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+            #     # tamper_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * cover_images # invert
+            # elif rand_num > 0.5:
+            #     tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
+            #     # tamper_images = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
 
-            if rand_num <= 0.5:
-                tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
-                # tamper_noisy_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * noisy_images # invert
-            elif rand_num > 0.5:
-                tamper_noisy_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
-                # tamper_noisy_images = (1 - random_masks) * images.detach().clone() + random_masks * noisy_images # invert
+            # if rand_num <= 0.5:
+            #     tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
+            #     # tamper_noisy_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * noisy_images # invert
+            # elif rand_num > 0.5:
+            #     tamper_noisy_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
+            #     # tamper_noisy_images = (1 - random_masks) * images.detach().clone() + random_masks * noisy_images # invert
 
             # add_quantization
             tamper_images = round_pixel(tamper_images)

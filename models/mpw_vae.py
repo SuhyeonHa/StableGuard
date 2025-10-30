@@ -73,105 +73,115 @@ class Conv2D(nn.Module):
         return outputs
     
 
-class MsgAdapter(nn.Module):
-    def __init__(self, in_channels, num_bits):
-        super(MsgAdapter, self).__init__()
-        self.num_bits = num_bits
+# class MsgAdapter(nn.Module):
+#     def __init__(self, in_channels, num_bits):
+#         super(MsgAdapter, self).__init__()
+#         self.num_bits = num_bits
         
-        self.secret_dense1 = Dense(self.num_bits, 32 * 32, activation='relu') 
-        self.secret_dense2 = Dense(32 * 32, 8 * 32 * 32, activation='relu') 
-        self.conv1 = Conv2D(in_channels+8, in_channels+8, 3, activation='relu')
-        self.conv2 = zero_module(Conv2D(in_channels+8, in_channels, 3, activation=None))
+#         self.secret_dense1 = Dense(self.num_bits, 32 * 32, activation='relu') 
+#         self.secret_dense2 = Dense(32 * 32, 8 * 32 * 32, activation='relu') 
+#         self.conv1 = Conv2D(in_channels+8, in_channels+8, 3, activation='relu')
+#         self.conv2 = zero_module(Conv2D(in_channels+8, in_channels, 3, activation=None))
     
-    def forward(self, img_feature, secrect):
-        secrect = 2 * (secrect - .5)
-        secrect = self.secret_dense1(secrect)  
-        secrect = self.secret_dense2(secrect)  
-        secrect = secrect.reshape(-1, 8, 32, 32) 
-        scale_factor = img_feature.size(-1) // 32
-        secrect_enlarged = nn.Upsample(scale_factor=(scale_factor, scale_factor))(secrect)
-        inputs = torch.cat([secrect_enlarged, img_feature], dim=1) 
-        conv1 = self.conv1(inputs) 
-        conv2 = self.conv2(conv1) 
+#     def forward(self, img_feature, secrect):
+#         secrect = 2 * (secrect - .5)
+#         secrect = self.secret_dense1(secrect)  
+#         secrect = self.secret_dense2(secrect)  
+#         secrect = secrect.reshape(-1, 8, 32, 32) 
+#         scale_factor = img_feature.size(-1) // 32
+#         secrect_enlarged = nn.Upsample(scale_factor=(scale_factor, scale_factor))(secrect)
+#         inputs = torch.cat([secrect_enlarged, img_feature], dim=1) 
+#         conv1 = self.conv1(inputs) 
+#         conv2 = self.conv2(conv1) 
         
-        return conv2 + img_feature
+#         return conv2 + img_feature
 
-class WatermarkGenerator(nn.Module):
-    def __init__(self, vector_dim: int, latent_h: int, latent_w: int):
-        super().__init__()
-        self.learnable_vector = nn.Parameter(torch.randn(1, vector_dim, 1, 1))
-        self.target_h = latent_h
-        self.target_w = latent_w
+# class WatermarkGenerator(nn.Module):
+#     def __init__(self, vector_dim: int, latent_h: int, latent_w: int):
+#         super().__init__()
+#         self.learnable_vector = nn.Parameter(torch.randn(1, vector_dim, 1, 1))
+#         self.target_h = latent_h
+#         self.target_w = latent_w
 
-    def forward(self, input_tensor: torch.Tensor) -> torch.Tensor:
-        B = input_tensor.shape[0]
-        # [1, vector_dim, 1, 1] -> [B, vector_dim, H, W]
-        watermark = self.learnable_vector.repeat(
-            B, 1, self.target_h, self.target_w
-        )
-        return watermark
+#     def forward(self, input_tensor: torch.Tensor) -> torch.Tensor:
+#         B = input_tensor.shape[0]
+#         # [1, vector_dim, 1, 1] -> [B, vector_dim, H, W]
+#         watermark = self.learnable_vector.repeat(
+#             B, 1, self.target_h, self.target_w
+#         )
+#         return watermark
     
-class DualAdapter(nn.Module):
-    def __init__(self, in_channels, num_bits):
-        super(DualAdapter, self).__init__()
-        self.num_bits = num_bits
+# class DualAdapter(nn.Module):
+#     def __init__(self, in_channels, num_bits):
+#         super(DualAdapter, self).__init__()
+#         self.num_bits = num_bits
         
-        # convert the secret message into a feature map with 8 channels
-        # self.secret_dense1 = Dense(self.num_bits, 32 * 32, activation='relu') 
-        # self.secret_dense2 = Dense(32 * 32, 8 * 32 * 32, activation='relu')
-        self.secret_conv1 = Conv2D(num_bits, 8, 1, activation='relu')
+#         # convert the secret message into a feature map with 8 channels
+#         # self.secret_dense1 = Dense(self.num_bits, 32 * 32, activation='relu') 
+#         # self.secret_dense2 = Dense(32 * 32, 8 * 32 * 32, activation='relu')
+#         self.secret_conv1 = Conv2D(num_bits, 8, 1, activation='relu')
 
 
-        # spatial branch
-        self.conv1 = Conv2D(in_channels+8, in_channels+8, 3, activation='relu')
-        self.conv2 = zero_module(Conv2D(in_channels+8, in_channels, 3, activation=None))
+#         # spatial branch
+#         self.conv1 = Conv2D(in_channels+8, in_channels+8, 3, activation='relu')
+#         self.conv2 = zero_module(Conv2D(in_channels+8, in_channels, 3, activation=None))
 
-        # frequency branch
-        self.freq_conv1 = Conv2D(in_channels+8, in_channels+8, 3, activation='relu')
-        self.freq_conv2 = zero_module(Conv2D(in_channels+8, in_channels, 3, activation=None))
-        self.freq_conv3 = Conv2D(in_channels+8, in_channels+8, 3, activation='relu')
-        self.freq_conv4 = zero_module(Conv2D(in_channels+8, in_channels, 3, activation=None))
+#         # frequency branch
+#         self.freq_conv1 = Conv2D(in_channels+8, in_channels+8, 3, activation='relu')
+#         self.freq_conv2 = zero_module(Conv2D(in_channels+8, in_channels, 3, activation=None))
+#         self.freq_conv3 = Conv2D(in_channels+8, in_channels+8, 3, activation='relu')
+#         self.freq_conv4 = zero_module(Conv2D(in_channels+8, in_channels, 3, activation=None))
 
-    def forward(self, img_feature, secret):
-        # secret = 2 * (secret - .5)
-        # secret = self.secret_dense1(secret)  
-        # secret = self.secret_dense2(secret)  
-        # secret = secret.reshape(-1, 8, 32, 32) 
+#     def forward(self, img_feature, secret):
+#         # secret = 2 * (secret - .5)
+#         # secret = self.secret_dense1(secret)  
+#         # secret = self.secret_dense2(secret)  
+#         # secret = secret.reshape(-1, 8, 32, 32) 
 
-        secret  = self.secret_conv1(secret)
-        scale_factor = img_feature.size(-1) // 32
-        secret_enlarged = nn.Upsample(scale_factor=(scale_factor, scale_factor))(secret)
+#         secret  = self.secret_conv1(secret)
+#         scale_factor = img_feature.size(-1) // 32
+#         secret_enlarged = nn.Upsample(scale_factor=(scale_factor, scale_factor))(secret)
         
-        ## two branches: spatial and frequency
-        # spatial branch
-        inputs = torch.cat([secret_enlarged, img_feature], dim=1)
-        conv1 = self.conv1(inputs) 
-        x_spatial = self.conv2(conv1)
+#         ## two branches: spatial and frequency
+#         # spatial branch
+#         inputs = torch.cat([secret_enlarged, img_feature], dim=1)
+#         conv1 = self.conv1(inputs) 
+#         x_spatial = self.conv2(conv1)
 
-        # frequency branch
+#         # frequency branch
+#         img_freq = torch.fft.rfft2(img_feature.float())
+#         wm_freq = torch.fft.rfft2(secret_enlarged.float())
+
+#         img_amp = torch.abs(img_freq)
+#         img_phase = torch.angle(img_freq)
+#         wm_amp = torch.abs(wm_freq)
+#         wm_phase = torch.angle(wm_freq)
+
+#         # [B, in_channels + 8, H, W//2+1]
+#         inputs = torch.cat([wm_phase, img_phase], dim=1)
+#         x_phase = self.freq_conv1(inputs)
+#         x_phase = self.freq_conv2(x_phase)
+
+#         inputs = torch.cat([wm_amp, img_amp], dim=1)
+#         x_amp = self.freq_conv3(inputs)
+#         x_amp = self.freq_conv4(x_amp)
+
+#         x_freq = torch.polar(x_amp.float(), x_phase.float())
+#         x_freq = torch.fft.irfft2(x_freq)  # [B, in_channels, H, W]
+
+#         return img_feature + x_spatial + x_freq
+    
+
+class FreqAdapter(nn.Module):
+    def __init__(self, c, h, w):
+        super(FreqAdapter, self).__init__()
+        self.watermark = nn.Parameter(torch.randn(1, c, h, w))
+
+    def forward(self, img_feature):
         img_freq = torch.fft.rfft2(img_feature.float())
-        wm_freq = torch.fft.rfft2(secret_enlarged.float())
-
-        img_amp = torch.abs(img_freq)
-        img_phase = torch.angle(img_freq)
-        wm_amp = torch.abs(wm_freq)
-        wm_phase = torch.angle(wm_freq)
-
-        # [B, in_channels + 8, H, W//2+1]
-        inputs = torch.cat([wm_phase, img_phase], dim=1)
-        x_phase = self.freq_conv1(inputs)
-        x_phase = self.freq_conv2(x_phase)
-
-        inputs = torch.cat([wm_amp, img_amp], dim=1)
-        x_amp = self.freq_conv3(inputs)
-        x_amp = self.freq_conv4(x_amp)
-
-        x_freq = torch.polar(x_amp.float(), x_phase.float())
-        x_freq = torch.fft.irfft2(x_freq)  # [B, in_channels, H, W]
-
-        return img_feature + x_spatial + x_freq
-
-
+        wm_freq = img_freq + self.watermark
+        watermarked = torch.fft.irfft2(wm_freq, dim=(-2, -1)).real
+        return watermarked
 
 class MultiplexingWatermarkVAEDecoder(nn.Module):
     r"""
@@ -224,7 +234,7 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         self.up_blocks = nn.ModuleList([])
         self.msg_adapters = nn.ModuleList([])
         self.num_bits = num_bits
-        self.watermark_generator = WatermarkGenerator(vector_dim=self.num_bits, latent_h=32, latent_w=32)
+        # self.watermark_generator = WatermarkGenerator(vector_dim=self.num_bits, latent_h=32, latent_w=32)
 
         temb_channels = in_channels if norm_type == "spatial" else None
 
@@ -240,7 +250,9 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
             temb_channels=temb_channels,
             add_attention=mid_block_add_attention,
         )
-
+        
+        latent_h, latent_w = 64, 64
+        
         # up
         reversed_block_out_channels = list(reversed(block_out_channels))
         output_channel = reversed_block_out_channels[0]
@@ -248,7 +260,7 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
             prev_output_channel = output_channel
             output_channel = reversed_block_out_channels[i]
 
-            self.msg_adapters.append(DualAdapter(in_channels=prev_output_channel, num_bits=num_bits)) # add msg adapter to each layer
+            self.msg_adapters.append(FreqAdapter(c=prev_output_channel, h=latent_h, w=latent_w)) # add msg adapter to each layer
 
             is_final_block = i == len(block_out_channels) - 1
 
@@ -269,6 +281,10 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
             self.up_blocks.append(up_block)
             prev_output_channel = output_channel
 
+            # double the latent size after each upsampling
+            if not is_final_block:
+                latent_h *= 2
+                latent_w *= 2
 
         # out
         if norm_type == "spatial":
@@ -285,7 +301,6 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         self,
         sample: torch.FloatTensor,
         latent_embeds: Optional[torch.FloatTensor] = None,
-        msgs: torch.FloatTensor = None,
     ) -> torch.FloatTensor:
         r"""The forward method of the `Decoder` class."""
 
@@ -296,11 +311,10 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         sample = self.mid_block(sample, latent_embeds)
         sample = sample.to(upscale_dtype)
 
-        watermark = self.watermark_generator(sample)
-
         # up
-        for up_block, adaptor in zip(self.up_blocks, self.msg_adapters): # add watermark
-            sample = adaptor(sample, watermark)
+        for up_block, adapter in zip(self.up_blocks, self.msg_adapters): # add watermark
+        # for up_block in self.up_blocks:
+            sample = adapter(sample)
             sample = up_block(sample, latent_embeds)
         # post-process
         if latent_embeds is None:
