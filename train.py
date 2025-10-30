@@ -193,11 +193,11 @@ def main():
     moe_gfn = MoEGuidedForensicNet()
     lpips = LPIPS(net="vgg") # WatsonDistanceVgg() both Perceptual loss is ok, WatsonDistanceVgg can get better image quality
 
-    # for name, param in original_vae.decoder.named_parameters():
-    #     if name in mpw_vae_decoder.state_dict():
-    #         mpw_vae_decoder.state_dict()[name].copy_(param.detach().clone())
-    #     else:
-    #         print(name)
+    for name, param in original_vae.decoder.named_parameters():
+        if name in mpw_vae_decoder.state_dict():
+            mpw_vae_decoder.state_dict()[name].copy_(param.detach().clone())
+        else:
+            print(name)
 
     # freeze parameters of models to save more memory
     original_vae.requires_grad_(False)
@@ -343,8 +343,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # Loss
             # similarity loss
-            lpips_loss = lpips(cover_images, images.float().detach().clone()).mean() 
-            mae_loss = F.l1_loss(cover_images, images.float().detach().clone())
+            lpips_loss = 0.1 * lpips(cover_images, images.float().detach().clone()).mean() 
+            mae_loss = 0.1 * F.l1_loss(cover_images, images.float().detach().clone())
 
             # watermark loss
             # msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
