@@ -175,13 +175,13 @@ class Conv2D(nn.Module):
 class FreqAdapter(nn.Module):
     def __init__(self, c, h, w):
         super(FreqAdapter, self).__init__()
-        # self.watermark = nn.Parameter(torch.randn(1, c, h, (w // 2) + 1))
-        self.watermark = nn.Parameter(torch.randn(1, c, h, w))
+        self.watermark = nn.Parameter(torch.randn(1, c, h, (w // 2) + 1))
+        # self.watermark = nn.Parameter(torch.randn(1, c, h, w))
 
     def forward(self, img_feature):
-        # img_freq = torch.fft.rfft2(img_feature.float())
-        watermarked = img_feature + self.watermark
-        # watermarked = torch.fft.irfft2(wm_freq, dim=(-2, -1)).real
+        img_freq = torch.fft.rfft2(img_feature.float())
+        watermarked = img_freq + self.watermark
+        watermarked = torch.fft.irfft2(watermarked, dim=(-2, -1)).real
         return watermarked
 
 class MultiplexingWatermarkVAEDecoder(nn.Module):
