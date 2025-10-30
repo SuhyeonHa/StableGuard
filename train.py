@@ -22,8 +22,22 @@ from lpips import LPIPS
 
 from dataset import CocoDataset, collate_fn
 from losses import WatsonDistanceVgg, weighted_binary_cross_entropy, dice_loss
-from models import MultiplexingWatermarkVAEDecoder, MoEGuidedForensicNet
+from models import Embedder, MoEGuidedForensicNet
 from utils_img import round_pixel
+from packaging import version
+
+import diffusers
+from diffusers import (
+    AutoencoderKL,
+    DDPMScheduler,
+    UNet2DConditionModel,
+    UniPCMultistepScheduler,
+)
+from diffusers.optimization import get_scheduler
+from diffusers.utils import check_min_version, is_wandb_available
+from diffusers.utils.import_utils import is_xformers_available
+from models.unet import UNet
+from transformers import CLIPTokenizer, CLIPTextModelWithProjection
 
 
 
@@ -154,12 +168,60 @@ def parse_args():
                     nargs='+', 
                     default=[0.0, 0.8], 
                     help="VAE decoder noise strength (e.g., --noise_strength 0.1 0.5)")
+    parser.add_argument("--enable_xformers_memory_efficient_attention", action="store_true")
+    parser.add_argument("--cache_dir", type=str, default="/mnt/nas5/suhyeon/caches", help="Path to a directory to cache the pre-trained models.")
+    parser.add_argument("--latent_h", type=int, default=64, help="Latent height for embedder")
+    parser.add_argument("--latent_w", type=int, default=64, help="Latent width for embedder")
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
         args.local_rank = env_local_rank
 
     return args
+
+def get_embedder_init_kwargs(
+    pretrained_config,
+    latent_height: int, 
+    latent_width: int
+    ):
+    
+    init_kwargs = {
+        "in_channels": pretrained_config.in_channels,
+        "out_channels": pretrained_config.out_channels,
+        "block_out_channels": pretrained_config.block_out_channels,
+        "layers_per_block": pretrained_config.layers_per_block,
+        "cross_attention_dim": pretrained_config.cross_attention_dim,
+        "attention_head_dim": pretrained_config.attention_head_dim,
+        "down_block_types": pretrained_config.down_block_types,
+        "up_block_types": pretrained_config.up_block_types,
+        "mid_block_type": pretrained_config.mid_block_type,
+
+        "only_cross_attention": pretrained_config.get("only_cross_attention", False),
+        "dual_cross_attention": pretrained_config.get("dual_cross_attention", False),
+        "use_linear_projection": pretrained_config.get("use_linear_projection", False),
+        "num_attention_heads": pretrained_config.get("num_attention_heads"),
+        "transformer_layers_per_block": pretrained_config.get("transformer_layers_per_block", 1),
+
+        "norm_num_groups": pretrained_config.get("norm_num_groups", 32),
+        "norm_eps": pretrained_config.get("norm_eps", 1e-5),
+        "upcast_attention": pretrained_config.get("upcast_attention", False),
+        "time_embedding_type": pretrained_config.get("time_embedding_type", "positional"),
+        "time_embedding_dim": pretrained_config.get("time_embedding_dim"),
+
+        "projection_class_embeddings_input_dim": pretrained_config.get("projection_class_embeddings_input_dim"),
+        "class_embed_type": pretrained_config.get("class_embed_type"),
+        "addition_embed_type": pretrained_config.get("addition_embed_type"),
+        "addition_time_embed_dim": pretrained_config.get("addition_time_embed_dim"),
+
+        "dropout": pretrained_config.get("dropout", 0.0),
+        "resnet_time_scale_shift": pretrained_config.get("resnet_time_scale_shift", "default"),
+        
+        # For embedder
+        "latent_height": latent_height,
+        "latent_width": latent_width,
+    }
+    
+    return init_kwargs
 
 
 def main():
@@ -188,23 +250,78 @@ def main():
             filename=os.path.join(args.output_dir, 'log.log'))
 
     # Load scheduler, tokenizer and models.
-    original_vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae")
-    mpw_vae_decoder = MultiplexingWatermarkVAEDecoder(num_bits=args.num_bits)
+    original_vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", cache_dir=args.cache_dir)
     moe_gfn = MoEGuidedForensicNet()
+    noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler", cache_dir=args.cache_dir)
+    unet = UNet.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet", cache_dir=args.cache_dir).to('cpu')
+    tokenizer = CLIPTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer", cache_dir=args.cache_dir)
+    text_encoder = CLIPTextModelWithProjection.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder", cache_dir=args.cache_dir)
+    unet_config = unet.config
+
+    print(f"Initializing Embedder (LocalizationUNet) on {args.device} using SD 2.1 config...")
+
+    init_kwargs = get_embedder_init_kwargs(
+        pretrained_config=unet_config,
+        latent_height=args.latent_h,
+        latent_width=args.latent_w
+    )
+    
+    embedder_model = Embedder(**init_kwargs).to(args.device)
+
     lpips = LPIPS(net="vgg") # WatsonDistanceVgg() both Perceptual loss is ok, WatsonDistanceVgg can get better image quality
 
-    for name, param in original_vae.decoder.named_parameters():
-        if name in mpw_vae_decoder.state_dict():
-            mpw_vae_decoder.state_dict()[name].copy_(param.detach().clone())
+    # for name, param in original_vae.decoder.named_parameters():
+    #     if name in mpw_vae_decoder.state_dict():
+    #         mpw_vae_decoder.state_dict()[name].copy_(param.detach().clone())
+    #     else:
+    #         print(name)
+
+    # copy weights from original U-Net to Embedder
+    print("Copying pre-trained weights from CPU to GPU model...")
+    original_weights = original_unet.state_dict()
+    custom_state_dict = embedder_model.state_dict()
+
+    copied_keys_count = 0
+    trainable_keys_count = 0
+    trainable_params_list = []
+
+    for name, param in custom_state_dict.items():
+        if name in original_weights:
+            # 원본 U-Net에 있는 가중치 복사
+            try:
+                param.copy_(original_weights[name].detach().clone())
+                param.requires_grad_(False) # frozen
+                copied_keys_count += 1
+            except RuntimeError as e:
+                print(f"  Error copying {name}: {e}")
         else:
-            print(name)
+            param.requires_grad_(True) # trainable
+            trainable_keys_count += 1
+            trainable_params_list.append(name)
 
-    # freeze parameters of models to save more memory
-    original_vae.requires_grad_(False)
-    mpw_vae_decoder.requires_grad_(False)
+    print(f"--- Initialization Complete ---")
+    print(f"Copied {copied_keys_count} matching U-Net layers (now frozen).")
+    print(f"Found {trainable_keys_count} new trainable localization maps.")
+    if trainable_keys_count > 0:
+         print(f"  Example trainable param: {trainable_params_list[0]}")
+    
+    del original_unet
+    del original_weights
+    
+    print(f"Embedder (LocalizationUNet) is ready on {args.device}.")
 
-    for param in mpw_vae_decoder.msg_adapters.parameters():
-        param.requires_grad = True
+    if args.enable_xformers_memory_efficient_attention:
+        if is_xformers_available():
+            import xformers
+
+            xformers_version = version.parse(xformers.__version__)
+            if xformers_version == version.parse("0.0.16"):
+                logger.warn(
+                    "xFormers 0.0.16 cannot be used for training in some GPUs. If you observe problems during training, please update xFormers to at least 0.0.17. See https://huggingface.co/docs/diffusers/main/en/optimization/xformers for more details."
+                )
+            unet.enable_xformers_memory_efficient_attention()
+        else:
+            raise ValueError("xformers is not available. Make sure it is installed correctly")
 
     weight_dtype = torch.float32
     if accelerator.mixed_precision == "fp16": # may result in ``Nan`` error 
@@ -212,14 +329,33 @@ def main():
     elif accelerator.mixed_precision == "bf16": # bf16 is recommended
         weight_dtype = torch.bfloat16
 
+    # freeze parameters of models to save more memory
+    original_vae.requires_grad_(False)
+    text_encoder.requires_grad_(False)
+    # mpw_vae_decoder.requires_grad_(False)
+
+    # for param in mpw_vae_decoder.msg_adapters.parameters():
+    #     param.requires_grad = True
+
     original_vae = original_vae.to(accelerator.device, dtype=weight_dtype)
     lpips = lpips.to(accelerator.device)
-    mpw_vae_decoder = mpw_vae_decoder.to(accelerator.device, dtype=weight_dtype)
+    embedder_model = embedder_model.to(accelerator.device, dtype=weight_dtype)
+    unet = unet.to(accelerator.device, dtype=weight_dtype)
+    text_encoder = text_encoder.to(accelerator.device, dtype=weight_dtype).eval()
 
-    cast_training_params([mpw_vae_decoder])
+    # null-prompt embedding
+    empty_prompts = [""]
+    text_inputs = tokenizer(empty_prompts, padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
+    text_input_ids = text_inputs.input_ids.to(accelerator.device)
+
+    with torch.no_grad():
+        prompt_embed = text_encoder(text_input_ids, output_hidden_states=True)
+        prompt_embed = prompt_embed[0].to(dtype=weight_dtype)
+
+    cast_training_params([embedder_model])
 
     # optimizer
-    params_to_opt = itertools.chain(mpw_vae_decoder.msg_adapters.parameters(),
+    params_to_opt = itertools.chain(embedder_model.localization_skip_params.parameters(),
                                     moe_gfn.parameters())
     
     optimizer = torch.optim.AdamW(params_to_opt, lr=args.learning_rate, weight_decay=args.weight_decay)
@@ -227,7 +363,7 @@ def main():
     # dataloader
     train_dataset = CocoDataset(data_root=args.data_root_path, mask_path=args.mask_pool_path, mode="train", size=args.resolution)   
     train_dataloader = torch.utils.data.DataLoader(
-        train_dataset,
+        train_dataset,  
         shuffle=True,
         collate_fn=collate_fn,
         batch_size=args.train_batch_size,
@@ -254,18 +390,18 @@ def main():
     )
 
     # Prepare everything with our `accelerator`.
-    mpw_vae_decoder, moe_gfn, optimizer, lr_scheduler, train_dataloader, val_dataloader = \
-        accelerator.prepare(mpw_vae_decoder, moe_gfn, optimizer, lr_scheduler, train_dataloader, val_dataloader)
+    embedder_model, moe_gfn, optimizer, lr_scheduler, train_dataloader, val_dataloader = \
+        accelerator.prepare(embedder_model, moe_gfn, optimizer, lr_scheduler, train_dataloader, val_dataloader)
 
     for epoch in range(0, args.num_train_epochs):
-        train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, optimizer, lr_scheduler, lpips, writer, logger)
-        val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, lpips, logger)
+        train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, embedder_model, moe_gfn, original_vae, optimizer, lr_scheduler, noise_scheduler, prompt_embed, lpips, writer, logger)
+        val(args, epoch, accelerator, val_dataloader, weight_dtype, embedder_model, moe_gfn, original_vae, lpips, logger)
         save_path = os.path.join(args.output_dir, f"checkpoint-last")
         accelerator.save_state(save_path, safe_serialization=False)
 
 
-def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, optimizer, lr_scheduler, lpips, writer, logger):
-    mpw_vae_decoder.train()
+def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, embedder_model, moe_gfn, original_vae, optimizer, lr_scheduler, noise_scheduler, prompt_embed,lpips, writer, logger):
+    embedder_model.train()
     moe_gfn.train()
     original_vae.train()
     global global_step
@@ -276,15 +412,20 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
         with accelerator.autocast():
             images = batch["images"]
             random_masks = batch["random_masks"] # invert. 1: watermarked region, 0: tampered region
+            prompt_embeds = prompt_embed.repeat(images.size(0), 1, 1, 1)
+            
             # Convert images to latent space
             with torch.no_grad():
                 latents = original_vae.encode(images).latent_dist.sample()
                 decode_images = original_vae.decode(latents, return_dict=False)[0] 
-                latents = original_vae.post_quant_conv(latents) # to process for another model (not sd-vae)
+                # latents = original_vae.post_quant_conv(latents) # to process for another model (not sd-vae)
+                
+                noise = torch.randn_like(latents)
+                timesteps = torch.randn_like((latents.size(0),), device=latents.device)
+                timesteps = (1-timesteps**3) * noise_scheduler.config.num_train_timesteps
+                timesteps = timesteps.long()
 
-                # get random watermark
-                # phi = torch.empty(latents.size(0), args.num_bits).uniform_(0,1)
-                # msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
+                noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
                     
                 # generate all one msg
                 msgs = (torch.ones(latents.size(0), args.num_bits).to(accelerator.device, dtype=weight_dtype))
@@ -305,7 +446,11 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 random_masks = torch.stack(random_masks_, dim=0)
 
             # watermarked image
-            cover_images = mpw_vae_decoder(latents, msgs=msgs)
+            predicted_noise = embedder_model(
+                sample=noisy_latents,
+                timestep=timesteps,
+                encoder_hidden_states=prompt_embeds,
+            ).sample
 
             with torch.no_grad():
                 cover_latents = original_vae.encode(cover_images).latent_dist.sample()
@@ -376,7 +521,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             accelerator.backward(loss)
 
             if accelerator.sync_gradients:
-                accelerator.clip_grad_norm_(list(moe_gfn.parameters()) + list(mpw_vae_decoder.parameters()), 5.0)
+                accelerator.clip_grad_norm_(list(moe_gfn.parameters()) + list(embedder_model.parameters()), 5.0)
             optimizer.step()
             optimizer.zero_grad()
             lr_scheduler.step()
@@ -431,8 +576,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 
 
 @torch.no_grad()
-def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, lpips, logger):
-    mpw_vae_decoder.eval()
+def val(args, epoch, accelerator, val_dataloader, weight_dtype, embedder_model, moe_gfn, original_vae, lpips, logger):
+    embedder_model.eval()
     moe_gfn.eval()
     original_vae.eval()
     avg_msg_loss = 0
@@ -451,7 +596,7 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                 phi = torch.empty(latents.size(0), args.num_bits).uniform_(0,1)
                 msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
 
-            cover_images = mpw_vae_decoder(latents, msgs=msgs)
+            cover_images = embedder_model(latents, msgs=msgs)
 
             with torch.no_grad():
                 cover_latents = original_vae.encode(cover_images).latent_dist.sample()
