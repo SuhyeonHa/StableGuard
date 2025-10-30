@@ -317,22 +317,22 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # random splicing
             rand_num = random.random()
             
-            tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
-            tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
+            # tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+            # tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
 
-            # if rand_num <= 0.5:
-            #     tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
-            #     # tamper_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * cover_images # invert
-            # elif rand_num > 0.5:
-            #     tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
-            #     # tamper_images = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
+            if rand_num <= 0.5:
+                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+                # tamper_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * cover_images # invert
+            elif rand_num > 0.5:
+                tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
+                # tamper_images = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
 
-            # if rand_num <= 0.5:
-            #     tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
-            #     # tamper_noisy_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * noisy_images # invert
-            # elif rand_num > 0.5:
-            #     tamper_noisy_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
-            #     # tamper_noisy_images = (1 - random_masks) * images.detach().clone() + random_masks * noisy_images # invert
+            if rand_num <= 0.5:
+                tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
+                # tamper_noisy_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * noisy_images # invert
+            elif rand_num > 0.5:
+                tamper_noisy_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
+                # tamper_noisy_images = (1 - random_masks) * images.detach().clone() + random_masks * noisy_images # invert
 
             # add_quantization
             tamper_images = round_pixel(tamper_images)
