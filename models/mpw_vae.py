@@ -175,7 +175,7 @@ class Conv2D(nn.Module):
 class FreqAdapter(nn.Module):
     def __init__(self, c, h, w):
         super(FreqAdapter, self).__init__()
-        self.watermark = nn.Parameter(torch.randn(1, c, h, w))
+        self.watermark = nn.Parameter(torch.randn(1, c, h, (w // 2) + 1))
 
     def forward(self, img_feature):
         img_freq = torch.fft.rfft2(img_feature.float())
@@ -251,7 +251,7 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
             add_attention=mid_block_add_attention,
         )
         
-        latent_h, latent_w = 64, 64
+        latent_h, latent_w = 32, 32
         
         # up
         reversed_block_out_channels = list(reversed(block_out_channels))
