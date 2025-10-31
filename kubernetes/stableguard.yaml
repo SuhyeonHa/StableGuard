@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-freqloc-decoder
+  name: suhyeon-train-freqloc-decoder-scratch
 spec:
   template:
     spec:
@@ -11,7 +11,7 @@ spec:
         nvidia.com/gpu.product: NVIDIA-GeForce-RTX-3090
       
       # Uncomment below if you want to use a specific node
-      nodeName: sgvr-gpu-021
+      nodeName: sgvr-gpu-013
 
       # Uncomment below if you want to use a GPU device with memory > 15000
       # affinity:
@@ -35,14 +35,14 @@ spec:
             cpu: 14 
             memory: "64Gi"
             # enter GPU count (e.g., 2)
-            nvidia.com/gpu: 1
+            nvidia.com/gpu: 2
             # enter docker storage size (removed after pod's lifetime)
             ephemeral-storage: 16G
           requests:
             cpu: 4
             memory: "8Gi"
             # enter GPU count (e.g., 2)
-            nvidia.com/gpu: 1
+            nvidia.com/gpu: 2
             # enter docker storage size (removed after pod's lifetime)
             ephemeral-storage: 16G
         command: ["/app/entrypoint.sh"]
