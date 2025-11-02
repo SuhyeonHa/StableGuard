@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-freqloc-decoder-scratch-gpus
+  name: suhyeon-train-freqloc-decoder-gpus
 spec:
   template:
     spec:
