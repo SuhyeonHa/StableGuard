@@ -267,7 +267,12 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
             prev_output_channel = output_channel
             output_channel = reversed_block_out_channels[i]
 
-            self.msg_adapters.append(FreqAdapter(c=prev_output_channel, h=latent_h, w=latent_w, num_bits=num_bits)) # add msg adapter to each layer
+            if latent_h == 64 or latent_h == 128:
+                # apply FreqAdapter for 128x128 and 256x256 resolutions
+                self.msg_adapters.append(FreqAdapter(c=prev_output_channel, h=latent_h, w=latent_w, num_bits=num_bits))
+            else:
+                # no watermarking for other resolutions
+                self.msg_adapters.append(nn.Identity())
 
             is_final_block = i == len(block_out_channels) - 1
 
