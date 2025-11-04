@@ -306,7 +306,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 random_masks = torch.stack(random_masks_, dim=0)
 
             # watermarked image
-            cover_images, watermark = mpw_vae_decoder(latents)
+            cover_images = mpw_vae_decoder(latents)
+            watermark = (cover_images - decode_images).detach().clone()
 
             with torch.no_grad():
                 cover_latents = original_vae.encode(cover_images).latent_dist.sample()
@@ -464,7 +465,8 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                 # phi = torch.empty(latents.size(0), args.num_bits).uniform_(0,1)
                 # msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
 
-            cover_images, watermark = mpw_vae_decoder(latents)
+            cover_images = mpw_vae_decoder(latents)
+            watermark = (cover_images - decode_images).detach().clone()
 
             with torch.no_grad():
                 cover_latents = original_vae.encode(cover_images).latent_dist.sample()
