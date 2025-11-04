@@ -270,6 +270,15 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
     pipe = StableDiffusionInpaintPipeline.from_pretrained(edit_model_name, cache_dir='/mnt/nas5/suhyeon/caches/')
     generator = torch.Generator().manual_seed(42)
 
+    # disables safety checks
+    def disabled_safety_checker(images, clip_input):
+        if len(images.shape)==4:
+            num_images = images.shape[0]
+            return images, [False]*num_images
+        else:
+            return images, False
+    pipe.safety_checker = disabled_safety_checker
+
     # load model
     if target_model == "stableguard":
         # initialize and load weights for MultiplexingWatermarkVAEDecoder
@@ -408,16 +417,17 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             cover_images = F.interpolate(cover_images, size=(size, size), mode="bilinear", align_corners=False)
 
         # inpaint
-        inpaint_input = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
-        generated_images = pipe(prompt="", image=inpaint_input, mask_image=masks, generator=generator).images[0]
+        # inpaint_input = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
+        generated_images = pipe(prompt="", image=cover_images, mask_image=masks, generator=generator).images[0] # num_inference_steps=15
 
         # pil to tensor, normalize to [-1,1], add batch dim
         generated_images = ToTensor()(generated_images).cuda()
         generated_images = (generated_images * 2.0 - 1.0).unsqueeze(0)
+        generated_images = F.interpolate(generated_images, size=(size, size), mode="bilinear", align_corners=False)
 
         # spliced images: replace regions indicated by mask with generated content
         # spliceless images: just the generated image without splicing
-        generated_images = F.interpolate(generated_images, size=(size, size), mode="bilinear", align_corners=False)
+        # generated_images = F.interpolate(generated_images, size=(size, size), mode="bilinear", align_corners=False)
         spliced_images = masks * generated_images + (1 - masks) * cover_images # operation in [-1, 1]
         spliceless_images = generated_images
 
@@ -730,7 +740,7 @@ if __name__ == "__main__":
         'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
         'size': 256,
         'start_idx': 0,
-        'end_idx': 5
+        'end_idx': 10
     }
     # ---------------------------------------------------
 
@@ -743,17 +753,17 @@ if __name__ == "__main__":
 
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
-    # save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    # generate_watermark_image(norm=c['normalization'],
-    #                          weight_path=c['weight_path'],
-    #                          target_model=c['target_model'],
-    #                          src_image_path=c['src_image_path'],
-    #                          save_path=c['save_path'],
-    #                          edit_model_name=c['edit_model_name'],
-    #                          num_bits=c['num_bits'],
-    #                          size=c['size'],
-    #                          start_idx=c['start_idx'],
-    #                          end_idx=c['end_idx'])
+    save_and_print_cfg = save_and_print_config(c, c['save_path'])
+    generate_watermark_image(norm=c['normalization'],
+                             weight_path=c['weight_path'],
+                             target_model=c['target_model'],
+                             src_image_path=c['src_image_path'],
+                             save_path=c['save_path'],
+                             edit_model_name=c['edit_model_name'],
+                             num_bits=c['num_bits'],
+                             size=c['size'],
+                             start_idx=c['start_idx'],
+                             end_idx=c['end_idx'])
 
     # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     eval_setting = ["spliced", "spliceless"]
@@ -769,5 +779,5 @@ if __name__ == "__main__":
         eva.run(f"{c['save_path']}/pred_mask_{setting}")
 
     # 4) Evaluate fidelity between watermarked and original images
-    # eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", img_size=c['size'])
-    # eva_fid.run(f"{c['save_path']}/cover_images")
+    eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", img_size=c['size'])
+    eva_fid.run(f"{c['save_path']}/cover_images")

@@ -2,7 +2,7 @@ weight_paths:
   omniguard: "/mnt/nas5/suhyeon/checkpoints/omniguard/"
   wam: "/mnt/nas5/suhyeon/checkpoints/wam/"
   stableguard: "/mnt/nas5/suhyeon/checkpoints/stableguard/weights/clean"
-  ours: "/mnt/nas5/suhyeon/projects/freqloc-ldm/exp09-baseline-dec12/checkpoint_10000"
+  ours: "/mnt/nas5/suhyeon/projects/freqloc-ldm/exp14-baseline-train-decoder/checkpoint_20000"
 
 normalization:
   omniguard: "rescale"
