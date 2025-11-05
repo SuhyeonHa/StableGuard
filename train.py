@@ -473,7 +473,7 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                 noise = torch.randn_like(cover_latents) * rand_strength
                 noisy_images = original_vae.decode(cover_latents + noise, return_dict=False)[0]
 
-            rand_num = random.random()
+            # rand_num = random.random()
             decode_cover = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
             # decode_cover = (1 - random_masks) * decode_images.detach().clone() + random_masks * cover_images # invert
 
