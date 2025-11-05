@@ -473,20 +473,18 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                 noise = torch.randn_like(cover_latents) * rand_strength
                 noisy_images = original_vae.decode(cover_latents + noise, return_dict=False)[0]
 
-            # random splicing
-            if rand_num <= 0.5:
-                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
-                # tamper_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * cover_images # invert
-            elif rand_num > 0.5:
-                tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
-                # tamper_images = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
+            rand_num = random.random()
+            decode_cover = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+            # decode_cover = (1 - random_masks) * decode_images.detach().clone() + random_masks * cover_images # invert
 
-            if rand_num <= 0.5:
-                tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
-                # tamper_noisy_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * noisy_images # invert
-            elif rand_num > 0.5:
-                tamper_noisy_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
-                # tamper_noisy_images = (1 - random_masks) * images.detach().clone() + random_masks * noisy_images # invert
+            orig_cover = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
+            # orig_cover = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
+
+            decode_noisy = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
+            # decode_noisy = (1 - random_masks) * decode_images.detach().clone() + random_masks * noisy_images # invert
+
+            orig_noisy = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
+            # orig_noisy = (1 - random_masks) * images.detach().clone() + random_masks * noisy_images # invert
 
             pred_decode_cover = moe_gfn(decode_cover.to(dtype=weight_dtype))
             pred_orig_cover = moe_gfn(orig_cover.to(dtype=weight_dtype))
