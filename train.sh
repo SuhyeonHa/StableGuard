@@ -8,8 +8,8 @@
   --dataloader_num_workers=4 \
   --learning_rate=1e-4 \
   --weight_decay=1e-2 \
-  --output_dir="/mnt/nas5/suhyeon/projects/freqloc-ldm/exp20-baseline-train-deep-augment" \
+  --output_dir="/mnt/nas5/suhyeon/projects/freqloc-ldm/exp21-baseline-train-middle-noise" \
   --save_steps=1000 \
   --num_train_epochs=10 \
   --num_bits=48 \
-  --noise_strength 0.0 0.5 \
+  --noise_strength 0.0 1.0 \
