@@ -24,6 +24,7 @@ from dataset import CocoDataset, collate_fn
 from losses import WatsonDistanceVgg, weighted_binary_cross_entropy, dice_loss
 from models import MultiplexingWatermarkVAEDecoder, MoEGuidedForensicNet
 from utils_img import round_pixel
+from noise_hook import NoiseHook
 
 
 
@@ -271,6 +272,14 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
     original_vae.train()
     global global_step
     begin = time.perf_counter()
+
+    # noise hook
+    hook_down1 = NoiseHook(noise_range=args.noise_strength)
+    hook_down2 = NoiseHook(noise_range=args.noise_strength)
+
+    target_layer1 = original_vae.encoder.down_blocks[1] # 64x64
+    target_layer2 = original_vae.encoder.down_blocks[2] # 128x128
+
     for step, batch in enumerate(train_dataloader):
         lr = lr_scheduler.get_last_lr()[0]
         load_data_time = time.perf_counter() - begin
@@ -309,11 +318,17 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             cover_images = mpw_vae_decoder(latents)
             watermark = (cover_images - decode_images).detach().clone()
 
+            hook_down1.enable()
+            hook_down2.enable()
+
             with torch.no_grad():
                 cover_latents = original_vae.encode(cover_images).latent_dist.sample()
-                rand_strength = random.uniform(args.noise_strength[0], args.noise_strength[1])
-                noise = torch.randn_like(cover_latents) * rand_strength
-                noisy_images = original_vae.decode(cover_latents + noise, return_dict=False)[0]
+                # rand_strength = random.uniform(args.noise_strength[0], args.noise_strength[1])
+                # noise = torch.randn_like(cover_latents) * rand_strength
+                noisy_images = original_vae.decode(cover_latents, return_dict=False)[0]
+
+            hook_down1.disable()
+            hook_down2.disable()
 
             # random splicing
             rand_num = random.random()
@@ -344,8 +359,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # Loss
             # similarity loss
-            lpips_loss = 0.1 * lpips(cover_images, images.float().detach().clone()).mean() # 0.1
-            mae_loss = 0.1 * F.l1_loss(cover_images, images.float().detach().clone()) # 0.1
+            lpips_loss = lpips(cover_images, images.float().detach().clone()).mean() # 0.1
+            mae_loss = F.l1_loss(cover_images, images.float().detach().clone()) # 0.1
 
             # watermark loss
             # msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
@@ -452,6 +467,14 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
     avg_mask_loss = 0
     avg_lpips_loss = 0
     avg_bit_correct = 0
+
+    # noise hook
+    hook_down1 = NoiseHook(noise_range=args.noise_strength)
+    hook_down2 = NoiseHook(noise_range=args.noise_strength)
+
+    target_layer1 = original_vae.encoder.down_blocks[1] # 64x64
+    target_layer2 = original_vae.encoder.down_blocks[2] # 128x128
+
     for step, batch in enumerate(tqdm(val_dataloader)):
         with accelerator.autocast():
             images = batch["images"]
@@ -467,11 +490,17 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             cover_images = mpw_vae_decoder(latents)
             watermark = (cover_images - decode_images).detach().clone()
 
+            hook_down1.enable()
+            hook_down2.enable()
+
             with torch.no_grad():
                 cover_latents = original_vae.encode(cover_images).latent_dist.sample()
-                rand_strength = random.uniform(args.noise_strength[0], args.noise_strength[1])
-                noise = torch.randn_like(cover_latents) * rand_strength
-                noisy_images = original_vae.decode(cover_latents + noise, return_dict=False)[0]
+                # rand_strength = random.uniform(args.noise_strength[0], args.noise_strength[1])
+                # noise = torch.randn_like(cover_latents) * rand_strength
+                noisy_images = original_vae.decode(cover_latents, return_dict=False)[0]
+
+            hook_down1.disable()
+            hook_down2.disable()
 
             # rand_num = random.random()
             decode_cover = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
