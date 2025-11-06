@@ -273,13 +273,6 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
     global global_step
     begin = time.perf_counter()
 
-    # noise hook
-    hook_down1 = NoiseHook(noise_range=args.noise_strength)
-    hook_down2 = NoiseHook(noise_range=args.noise_strength)
-
-    target_layer1 = original_vae.encoder.down_blocks[1] # 64x64
-    target_layer2 = original_vae.encoder.down_blocks[2] # 128x128
-
     for step, batch in enumerate(train_dataloader):
         lr = lr_scheduler.get_last_lr()[0]
         load_data_time = time.perf_counter() - begin
@@ -316,19 +309,11 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # watermarked image
             cover_images = mpw_vae_decoder(latents)
-            watermark = (cover_images - decode_images).detach().clone()
-
-            hook_down1.enable()
-            hook_down2.enable()
 
             with torch.no_grad():
-                cover_latents = original_vae.encode(cover_images).latent_dist.sample()
-                # rand_strength = random.uniform(args.noise_strength[0], args.noise_strength[1])
-                # noise = torch.randn_like(cover_latents) * rand_strength
-                noisy_images = original_vae.decode(cover_latents, return_dict=False)[0]
-
-            hook_down1.disable()
-            hook_down2.disable()
+                decode_masked_latents = original_vae.encode(decode_images*random_masks).latent_dist.sample()
+                cover_masked_latents = original_vae.encode(cover_images*(1-random_masks)).latent_dist.sample()
+                inpainted_images = original_vae.decode(decode_masked_latents + cover_masked_latents, return_dict=False)[0]
 
             # random splicing
             rand_num = random.random()
@@ -336,6 +321,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
             # tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
 
+            # splicing
             if rand_num <= 0.5:
                 tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
                 # tamper_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * cover_images # invert
@@ -343,12 +329,15 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
                 # tamper_images = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
 
-            if rand_num <= 0.5:
-                tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
-                # tamper_noisy_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * noisy_images # invert
-            elif rand_num > 0.5:
-                tamper_noisy_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
-                # tamper_noisy_images = (1 - random_masks) * images.detach().clone() + random_masks * noisy_images # invert
+            # spliceless
+            tamper_noisy_images = inpainted_images
+
+            # if rand_num <= 0.5:
+            #     tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
+            #     tamper_noisy_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * noisy_images # invert
+            # elif rand_num > 0.5:
+            #     tamper_noisy_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
+            #     # tamper_noisy_images = (1 - random_masks) * images.detach().clone() + random_masks * noisy_images # invert
 
             # add_quantization
             tamper_images = round_pixel(tamper_images)
@@ -468,13 +457,6 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
     avg_lpips_loss = 0
     avg_bit_correct = 0
 
-    # noise hook
-    hook_down1 = NoiseHook(noise_range=args.noise_strength)
-    hook_down2 = NoiseHook(noise_range=args.noise_strength)
-
-    target_layer1 = original_vae.encoder.down_blocks[1] # 64x64
-    target_layer2 = original_vae.encoder.down_blocks[2] # 128x128
-
     for step, batch in enumerate(tqdm(val_dataloader)):
         with accelerator.autocast():
             images = batch["images"]
@@ -488,19 +470,12 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                 # msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
 
             cover_images = mpw_vae_decoder(latents)
-            watermark = (cover_images - decode_images).detach().clone()
-
-            hook_down1.enable()
-            hook_down2.enable()
 
             with torch.no_grad():
-                cover_latents = original_vae.encode(cover_images).latent_dist.sample()
-                # rand_strength = random.uniform(args.noise_strength[0], args.noise_strength[1])
-                # noise = torch.randn_like(cover_latents) * rand_strength
-                noisy_images = original_vae.decode(cover_latents, return_dict=False)[0]
+                decode_masked_latents = original_vae.encode(decode_images*random_masks).latent_dist.sample()
+                cover_masked_latents = original_vae.encode(cover_images*(1-random_masks)).latent_dist.sample()
+                inpainted_images = original_vae.decode(decode_masked_latents + cover_masked_latents, return_dict=False)[0]
 
-            hook_down1.disable()
-            hook_down2.disable()
 
             # rand_num = random.random()
             decode_cover = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
@@ -509,16 +484,13 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             orig_cover = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
             # orig_cover = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
 
-            decode_noisy = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
-            # decode_noisy = (1 - random_masks) * decode_images.detach().clone() + random_masks * noisy_images # invert
-
-            orig_noisy = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
-            # orig_noisy = (1 - random_masks) * images.detach().clone() + random_masks * noisy_images # invert
+            spliceless = inpainted_images
 
             pred_decode_cover = moe_gfn(decode_cover.to(dtype=weight_dtype))
             pred_orig_cover = moe_gfn(orig_cover.to(dtype=weight_dtype))
-            pred_decode_noisy = moe_gfn(decode_noisy.to(dtype=weight_dtype))
-            pred_orig_noisy = moe_gfn(orig_noisy.to(dtype=weight_dtype))
+            # pred_decode_noisy = moe_gfn(decode_noisy.to(dtype=weight_dtype))
+            # pred_orig_noisy = moe_gfn(orig_noisy.to(dtype=weight_dtype))
+            pred_spliceless = moe_gfn(spliceless.to(dtype=weight_dtype))
 
             # msg_loss = F.binary_cross_entropy_with_logits(msg_decode_cover, msgs.float().detach().clone()) + \
             #             F.binary_cross_entropy_with_logits(msg_orig_cover, msgs.float().detach().clone()) + \
@@ -528,10 +500,12 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                         0.2 * dice_loss(pred_decode_cover, F.interpolate(random_masks, (pred_decode_cover.size(2), pred_decode_cover.size(3))).detach().clone()) + \
                         0.8 * weighted_binary_cross_entropy(pred_orig_cover, F.interpolate(random_masks, (pred_orig_cover.size(2), pred_orig_cover.size(3))).detach().clone()) + \
                         0.2 * dice_loss(pred_orig_cover, F.interpolate(random_masks, (pred_orig_cover.size(2), pred_orig_cover.size(3))).detach().clone())
-            noisy_mask_loss = 0.8 * weighted_binary_cross_entropy(pred_decode_noisy, F.interpolate(random_masks, (pred_decode_noisy.size(2), pred_decode_noisy.size(3))).detach().clone()) + \
-                        0.2 * dice_loss(pred_decode_noisy, F.interpolate(random_masks, (pred_decode_noisy.size(2), pred_decode_noisy.size(3))).detach().clone()) + \
-                        0.8 * weighted_binary_cross_entropy(pred_orig_noisy, F.interpolate(random_masks, (pred_orig_noisy.size(2), pred_orig_noisy.size(3))).detach().clone()) + \
-                        0.2 * dice_loss(pred_orig_noisy, F.interpolate(random_masks, (pred_orig_noisy.size(2), pred_orig_noisy.size(3))).detach().clone())
+            # noisy_mask_loss = 0.8 * weighted_binary_cross_entropy(pred_decode_noisy, F.interpolate(random_masks, (pred_decode_noisy.size(2), pred_decode_noisy.size(3))).detach().clone()) + \
+            #             0.2 * dice_loss(pred_decode_noisy, F.interpolate(random_masks, (pred_decode_noisy.size(2), pred_decode_noisy.size(3))).detach().clone()) + \
+            #             0.8 * weighted_binary_cross_entropy(pred_orig_noisy, F.interpolate(random_masks, (pred_orig_noisy.size(2), pred_orig_noisy.size(3))).detach().clone()) + \
+            #             0.2 * dice_loss(pred_orig_noisy, F.interpolate(random_masks, (pred_orig_noisy.size(2), pred_orig_noisy.size(3))).detach().clone())
+            noisy_mask_loss = 0.8 * weighted_binary_cross_entropy(pred_spliceless, F.interpolate(random_masks, (pred_spliceless.size(2), pred_spliceless.size(3))).detach().clone()) +\
+                              0.2 * dice_loss(pred_spliceless, F.interpolate(random_masks, (pred_spliceless.size(2), pred_spliceless.size(3))).detach().clone())
             lpips_loss = lpips(cover_images, images.float().detach().clone()).mean() 
 
             # pred_msgs_decode_cover_bin = torch.round(torch.sigmoid(msg_decode_cover))
@@ -567,13 +541,15 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                                    ((cover_images - images) *10)[:args.train_batch_size],
                                    decode_cover[:args.train_batch_size],
                                    orig_cover[:args.train_batch_size],
-                                   decode_noisy[:args.train_batch_size],
-                                   orig_noisy[:args.train_batch_size],
+                                   spliceless[:args.train_batch_size],
+                                #    decode_noisy[:args.train_batch_size],
+                                #    orig_noisy[:args.train_batch_size],
                                    random_masks.repeat(1, 3, 1, 1)[:args.train_batch_size], 
                                    F.sigmoid(F.interpolate(pred_decode_cover, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size],
                                    F.sigmoid(F.interpolate(pred_orig_cover, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size],
-                                   F.sigmoid(F.interpolate(pred_decode_noisy, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size],
-                                   F.sigmoid(F.interpolate(pred_orig_noisy, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size]
+                                   F.sigmoid(F.interpolate(pred_spliceless, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size],
+                                #    F.sigmoid(F.interpolate(pred_decode_noisy, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size],
+                                #    F.sigmoid(F.interpolate(pred_orig_noisy, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size]
                                    ], dim=0).detach().clone()
         save_image(result_images, os.path.join(args.output_dir, 'images/test', '%s.jpg' % epoch), normalize=True, scale_each=True, nrow=args.train_batch_size)   
 
