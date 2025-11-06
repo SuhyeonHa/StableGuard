@@ -349,8 +349,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # Loss
             # similarity loss
-            lpips_loss = lpips(cover_images, images.float().detach().clone()).mean() # 0.1
-            mae_loss = F.l1_loss(cover_images, images.float().detach().clone()) # 0.1
+            lpips_loss = 0.1 * lpips(cover_images, images.float().detach().clone()).mean() # 0.1
+            mae_loss = 0.1 * F.l1_loss(cover_images, images.float().detach().clone()) # 0.1
 
             # watermark loss
             # msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, msgs.float().detach().clone())
