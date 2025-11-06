@@ -311,9 +311,11 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             cover_images = mpw_vae_decoder(latents)
 
             with torch.no_grad():
-                decode_masked_latents = original_vae.encode(decode_images*random_masks).latent_dist.sample()
-                cover_masked_latents = original_vae.encode(cover_images*(1-random_masks)).latent_dist.sample()
-                inpainted_images = original_vae.decode(decode_masked_latents + cover_masked_latents, return_dict=False)[0]
+                decode_masked_latents = original_vae.encode(random_masks*decode_images).latent_dist.sample()
+                decode_masked_images = original_vae.decode(decode_masked_latents, return_dict=False)[0]
+                cover_masked_latents = original_vae.encode((1 - random_masks)*cover_images).latent_dist.sample()
+                cover_masked_images = original_vae.decode(cover_masked_latents, return_dict=False)[0]
+
 
             # random splicing
             rand_num = random.random()
@@ -330,7 +332,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 # tamper_images = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
 
             # spliceless
-            tamper_noisy_images = inpainted_images
+            tamper_noisy_images = random_masks * decode_masked_images.detach().clone() + (1 - random_masks) * cover_masked_images
 
             # if rand_num <= 0.5:
             #     tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
@@ -472,9 +474,10 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             cover_images = mpw_vae_decoder(latents)
 
             with torch.no_grad():
-                decode_masked_latents = original_vae.encode(decode_images*random_masks).latent_dist.sample()
-                cover_masked_latents = original_vae.encode(cover_images*(1-random_masks)).latent_dist.sample()
-                inpainted_images = original_vae.decode(decode_masked_latents + cover_masked_latents, return_dict=False)[0]
+                decode_masked_latents = original_vae.encode(random_masks*decode_images).latent_dist.sample()
+                decode_masked_images = original_vae.decode(decode_masked_latents, return_dict=False)[0]
+                cover_masked_latents = original_vae.encode((1 - random_masks)*cover_images).latent_dist.sample()
+                cover_masked_images = original_vae.decode(cover_masked_latents, return_dict=False)[0]
 
 
             # rand_num = random.random()
@@ -484,7 +487,7 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             orig_cover = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
             # orig_cover = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
 
-            spliceless = inpainted_images
+            spliceless = random_masks * decode_masked_images.detach().clone() + (1 - random_masks) * cover_masked_images
 
             pred_decode_cover = moe_gfn(decode_cover.to(dtype=weight_dtype))
             pred_orig_cover = moe_gfn(orig_cover.to(dtype=weight_dtype))
