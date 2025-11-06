@@ -283,14 +283,14 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             with torch.no_grad():
                 latents = original_vae.encode(images).latent_dist.sample()
                 decode_images = original_vae.decode(latents, return_dict=False)[0] 
-                latents = original_vae.post_quant_conv(latents) # to process for another model (not sd-vae)
+                latents_post = original_vae.post_quant_conv(latents) # to process for another model (not sd-vae)
 
                 # get random watermark
-                phi = torch.empty(latents.size(0), args.num_bits).uniform_(0,1)
+                phi = torch.empty(latents_post.size(0), args.num_bits).uniform_(0,1)
                 msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
                     
                 # generate all one msg
-                # msgs = (torch.ones(latents.size(0), args.num_bits).to(accelerator.device, dtype=weight_dtype))
+                # msgs = (torch.ones(latents_post.size(0), args.num_bits).to(accelerator.device, dtype=weight_dtype))
 
                 msgs_ = []
                 random_masks_ = []
@@ -308,14 +308,13 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 random_masks = torch.stack(random_masks_, dim=0)
 
             # watermarked image
-            cover_images = mpw_vae_decoder(latents)
+            cover_images = mpw_vae_decoder(latents_post)
 
-            with torch.no_grad():
-                decode_masked_latents = original_vae.encode(random_masks*decode_images).latent_dist.sample()
-                decode_masked_images = original_vae.decode(decode_masked_latents, return_dict=False)[0]
-                cover_masked_latents = original_vae.encode((1 - random_masks)*cover_images).latent_dist.sample()
-                cover_masked_images = original_vae.decode(cover_masked_latents, return_dict=False)[0]
-
+            # with torch.no_grad():
+            latents_cover = original_vae.encode(cover_images).latent_dist.sample()
+            latent_mask = F.interpolate(random_masks, size=latents_cover.shape[-2:])
+            spliced_latent = latent_mask * latents + (1 - latent_mask) * latents_cover
+            spliceless = original_vae.decode(spliced_latent, return_dict=False)[0]
 
             # random splicing
             rand_num = random.random()
@@ -332,7 +331,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 # tamper_images = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
 
             # spliceless
-            tamper_noisy_images = random_masks * decode_masked_images.detach().clone() + (1 - random_masks) * cover_masked_images
+            tamper_noisy_images = spliceless
 
             # if rand_num <= 0.5:
             #     tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
@@ -467,17 +466,17 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             with torch.no_grad():
                 latents = original_vae.encode(images).latent_dist.sample()
                 decode_images = original_vae.decode(latents, return_dict=False)[0]
-                latents = original_vae.post_quant_conv(latents) # to process for another model (not vae)
+                latents_post = original_vae.post_quant_conv(latents) # to process for another model (not vae)
                 # phi = torch.empty(latents.size(0), args.num_bits).uniform_(0,1)
                 # msgs = (torch.bernoulli(phi) + 1e-8).to(accelerator.device, dtype=weight_dtype)
 
-            cover_images = mpw_vae_decoder(latents)
+            cover_images = mpw_vae_decoder(latents_post)
 
-            with torch.no_grad():
-                decode_masked_latents = original_vae.encode(random_masks*decode_images).latent_dist.sample()
-                decode_masked_images = original_vae.decode(decode_masked_latents, return_dict=False)[0]
-                cover_masked_latents = original_vae.encode((1 - random_masks)*cover_images).latent_dist.sample()
-                cover_masked_images = original_vae.decode(cover_masked_latents, return_dict=False)[0]
+            # with torch.no_grad():
+            latents_cover = original_vae.encode(cover_images).latent_dist.sample()
+            latent_mask = F.interpolate(random_masks, size=latents_cover.shape[-2:])
+            spliced_latent = latent_mask * latents + (1 - latent_mask) * latents_cover
+            spliceless = original_vae.decode(spliced_latent, return_dict=False)[0]
 
 
             # rand_num = random.random()
@@ -486,8 +485,6 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
 
             orig_cover = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
             # orig_cover = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
-
-            spliceless = random_masks * decode_masked_images.detach().clone() + (1 - random_masks) * cover_masked_images
 
             pred_decode_cover = moe_gfn(decode_cover.to(dtype=weight_dtype))
             pred_orig_cover = moe_gfn(orig_cover.to(dtype=weight_dtype))
