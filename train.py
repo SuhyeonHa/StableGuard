@@ -24,7 +24,7 @@ from dataset import CocoDataset, collate_fn
 from losses import WatsonDistanceVgg, weighted_binary_cross_entropy, dice_loss
 from models import MultiplexingWatermarkVAEDecoder, MoEGuidedForensicNet
 from utils_img import round_pixel
-from noise_hook import NoiseHook
+from models.noise_hook import NoiseHook
 
 
 
