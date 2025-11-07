@@ -16,6 +16,8 @@ from diffusers.models.unets.unet_2d_blocks import (
     get_up_block,
 )
 
+from typing import List
+from diffusers import AutoencoderKL
 
 
 def zero_module(module):
@@ -25,7 +27,23 @@ def zero_module(module):
     for p in module.parameters():
         p.detach().zero_()
     return module
-    
+
+
+def _get_feature_maps(self, sample):
+    sample = self.conv_in(sample)
+    l_blocks = []
+    # down
+    for down_block in self.down_blocks:
+        l_blocks.append(sample)
+        sample = down_block(sample)
+    # middle
+    sample = self.mid_block(sample)
+    sample = self.conv_norm_out(sample)
+    sample = self.conv_act(sample)
+    sample = self.conv_out(sample)
+    self.current_down_blocks = l_blocks
+    return sample
+
 
 class Dense(nn.Module):
     def __init__(self, in_features, out_features, activation='relu', kernel_initializer='he_normal'):
@@ -71,6 +89,29 @@ class Conv2D(nn.Module):
             else:
                 raise NotImplementedError
         return outputs
+    
+class ConditionAdaptor(nn.Module):
+    def __init__(self):
+        super(ConditionAdaptor, self).__init__()
+        self.secret_dense1 = Dense(3, 32 * 32, activation='relu') 
+        self.secret_dense2 = Dense(32 * 32, 3 * 32 * 32, activation='relu')
+        # self.secret_conv1 = Conv2D(3, 3, 3, activation='relu')
+        # self.conv1 = Conv2D(3, 3, 3, activation='relu')
+        # self.conv2 = Conv2D(3, 3, 1, activation=None)
+    
+    def forward(self, secret):
+        # B, C, H, W = img_feature.shape
+        # secret = 2 * (secret - .5) # normalize to [-1, 1]
+        # secret_map = secret.view(B, -1, 1, 1).repeat(1, 1, H, W)
+
+        # inputs = torch.cat([secret_map, img_feature], dim=1)
+        # inputs = img_feature + secret_map
+        # conv1 = self.conv1(inputs) 
+        # conv2 = self.conv2(conv1) 
+        out = self.secret_dense1(secret)
+        out = self.secret_dense2(out)
+        out = out.reshape(-1, 3, 32, 32)
+        return out
     
 
 # class MsgAdapter(nn.Module):
@@ -172,23 +213,23 @@ class Conv2D(nn.Module):
 #         return img_feature + x_spatial + x_freq
     
 
-class FreqAdapter(nn.Module):
-    def __init__(self, c, h, w, num_bits):
-        super(FreqAdapter, self).__init__()
-        # self.watermark = nn.Parameter(torch.randn(1, c, h, (w // 2) + 1))
-        self.num_bits = num_bits
-        self.watermark = nn.Parameter(torch.randn(1, c, h, w))
-        # self.secret_dense1 = Dense(self.num_bits, h * w, activation='relu') 
-        # self.secret_dense2 = Dense(h * w, c * h * w, activation='relu')
+# class FreqAdapter(nn.Module):
+#     def __init__(self, c, h, w, num_bits):
+#         super(FreqAdapter, self).__init__()
+#         # self.watermark = nn.Parameter(torch.randn(1, c, h, (w // 2) + 1))
+#         self.num_bits = num_bits
+#         self.watermark = nn.Parameter(torch.randn(1, c, h, w))
+#         # self.secret_dense1 = Dense(self.num_bits, h * w, activation='relu') 
+#         # self.secret_dense2 = Dense(h * w, c * h * w, activation='relu')
 
-    def forward(self, img_feature):
-        # img_freq = torch.fft.rfft2(img_feature.float())
-        # watermark = self.secret_dense1(msgs)
-        # watermark = self.secret_dense2(watermark)
-        # watermark = watermark.reshape(-1, img_feature.size(1), img_feature.size(2), img_feature.size(3))
-        watermarked = img_feature + self.watermark
-        # watermarked = torch.fft.irfft2(wm_freq, dim=(-2, -1)).real
-        return watermarked
+#     def forward(self, img_feature):
+#         # img_freq = torch.fft.rfft2(img_feature.float())
+#         # watermark = self.secret_dense1(msgs)
+#         # watermark = self.secret_dense2(watermark)
+#         # watermark = watermark.reshape(-1, img_feature.size(1), img_feature.size(2), img_feature.size(3))
+#         watermarked = img_feature + self.watermark
+#         # watermarked = torch.fft.irfft2(wm_freq, dim=(-2, -1)).real
+#         return watermarked
 
 class MultiplexingWatermarkVAEDecoder(nn.Module):
     r"""
@@ -228,6 +269,7 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
     ):
         super().__init__()
         self.layers_per_block = layers_per_block
+        self.secret_to_map = ConditionAdaptor()
 
         self.conv_in = nn.Conv2d(
             in_channels,
@@ -241,7 +283,6 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         self.up_blocks = nn.ModuleList([])
         self.msg_adapters = nn.ModuleList([])
         self.num_bits = num_bits
-        # self.watermark_generator = WatermarkGenerator(vector_dim=self.num_bits, latent_h=32, latent_w=32)
 
         temb_channels = in_channels if norm_type == "spatial" else None
 
@@ -259,21 +300,40 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         )
         
         latent_h, latent_w = 32, 32
+
+        self.skip_conv_1 = torch.nn.Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=1, bias=True).cuda().requires_grad_(True)
+        self.skip_conv_2 = torch.nn.Conv2d(256, 512, kernel_size=(3, 3), stride=(1, 1), padding=1, bias=True).cuda().requires_grad_(True)
+        self.skip_conv_3 = torch.nn.Conv2d(128, 512, kernel_size=(3, 3), stride=(1, 1), padding=1, bias=True).cuda().requires_grad_(True)
+        self.skip_conv_4 = torch.nn.Conv2d(128, 256, kernel_size=(3, 3), stride=(1, 1), padding=1, bias=True).cuda().requires_grad_(True)
+        torch.nn.init.constant_(self.skip_conv_1.weight, 1e-5)
+        torch.nn.init.constant_(self.skip_conv_2.weight, 1e-5)
+        torch.nn.init.constant_(self.skip_conv_3.weight, 1e-5)
+        torch.nn.init.constant_(self.skip_conv_4.weight, 1e-5)
+
+        self.fusion_blocks = nn.ModuleList([])
         
+        fusion_sample_channels = [512, 512, 512, 256] 
+        fusion_skip_channels = [512, 512, 512, 256] 
+        
+        for i in range(len(up_block_types)):
+            in_ch = fusion_sample_channels[i] + fusion_skip_channels[i] + self.num_bits
+            out_ch = fusion_sample_channels[i]
+            bottleneck_ch = in_ch // 4
+
+            self.fusion_blocks.append(
+                nn.Sequential(
+                    nn.Conv2d(in_ch, bottleneck_ch, kernel_size=1), # Down-sample
+                    nn.SiLU(),
+                    nn.Conv2d(bottleneck_ch, out_ch, kernel_size=1) # Up-sample
+                )
+            )
+
         # up
         reversed_block_out_channels = list(reversed(block_out_channels))
         output_channel = reversed_block_out_channels[0]
         for i, up_block_type in enumerate(up_block_types):
             prev_output_channel = output_channel
             output_channel = reversed_block_out_channels[i]
-
-            if latent_h == 32:
-                # apply FreqAdapter for 32x32 resolutions
-                self.msg_adapters.append(FreqAdapter(c=prev_output_channel, h=latent_h, w=latent_w, num_bits=num_bits))
-            else:
-                # no watermarking for other resolutions
-                self.msg_adapters.append(nn.Identity())
-
             is_final_block = i == len(block_out_channels) - 1
 
             up_block = get_up_block(
@@ -312,11 +372,21 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
     def forward(
         self,
         sample: torch.FloatTensor,
+        vae: AutoencoderKL,
+        secret: torch.FloatTensor,
         latent_embeds: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         r"""The forward method of the `Decoder` class."""
 
-        sample = self.conv_in(sample)
+        spatial_secret = self.secret_to_map(secret)
+        
+        latents = vae.encode(sample).latent_dist.sample()
+        decode_images = vae.decode(latents, return_dict=False)[0] 
+        latents = vae.post_quant_conv(latents) # to process for another model (not sd-vae)
+
+        feature_maps = vae.encoder.current_down_blocks
+
+        sample = self.conv_in(latents)
         upscale_dtype = next(iter(self.up_blocks.parameters())).dtype
         
         # middle
@@ -324,10 +394,32 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         sample = sample.to(upscale_dtype)
 
         # up
-        for up_block, adapter in zip(self.up_blocks, self.msg_adapters): # add watermark
-        # for up_block in self.up_blocks:
-            sample = adapter(sample)
+
+        # # original
+        # for idx, up_block in enumerate(self.up_blocks):
+        #     sample = up_block(sample, latent_embeds)
+
+        # use skip-connections
+        skip_convs = [self.skip_conv_1, self.skip_conv_2, self.skip_conv_3, self.skip_conv_4]
+        for idx, up_block in enumerate(self.up_blocks):
+            skip_in = skip_convs[idx](feature_maps[::-1][idx])
+            # add skip
+            # sample = sample + skip_in
+            # fuse skip connection and secret
+            current_h, current_w = sample.shape[2:]
+            secret_expanded = nn.Upsample(size=(current_h, current_w))(spatial_secret)
+            combined_input = torch.cat([sample, skip_in, secret_expanded], dim=1)
+            fusion_out = self.fusion_blocks[idx](combined_input)
+            sample = sample + fusion_out
+
+
             sample = up_block(sample, latent_embeds)
+
+        # # use adapters
+        # for up_block, adapter in zip(self.up_blocks, self.msg_adapters): # add watermark
+        #     sample = adapter(sample)
+        #     sample = up_block(sample, latent_embeds)
+            
         # post-process
         if latent_embeds is None:
             sample = self.conv_norm_out(sample)
@@ -335,4 +427,4 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
             sample = self.conv_norm_out(sample, latent_embeds)
         sample = self.conv_act(sample)
         sample = self.conv_out(sample)
-        return sample
+        return sample, decode_images
