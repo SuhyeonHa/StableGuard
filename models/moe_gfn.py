@@ -74,7 +74,7 @@ class MoEGuidedForensicNet(nn.Module):
         # 1. Backbone
         self.model = timm.create_model(model_name, pretrained=True, features_only=True, in_chans=in_chans)
         for param in self.model.parameters():
-            param.requires_grad = False
+            param.requires_grad = True # convnext fine-tune
         
         feature_channels = self.model.feature_info.channels()
         pyramid_channels = 256 # A common choice for FPN
