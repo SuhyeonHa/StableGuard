@@ -116,7 +116,7 @@ class ConditionAdaptor(nn.Module):
 class FusionBlock(nn.Module):
     def __init__(self, h: int, w: int, ch: int, out_ch: int):
         super().__init__()
-        self.watermark_map = nn.Parameter(torch.randn(1, c, h, w))
+        self.watermark_map = nn.Parameter(torch.randn(1, ch, h, w))
 
         in_ch = ch * 3 # sample_ch + skip_ch + watermark_ch
         bottleneck_ch = in_ch // 4
