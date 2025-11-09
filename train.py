@@ -370,8 +370,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # Loss
             # similarity loss
-            lpips_loss = 0.1 * lpips(cover_images, images.float().detach().clone()).mean() # 0.1
-            mae_loss = 0.1 * F.l1_loss(cover_images, images.float().detach().clone()) # 0.1
+            lpips_loss = lpips(cover_images, images.float().detach().clone()).mean() # 0.1
+            mae_loss = F.l1_loss(cover_images, images.float().detach().clone()) # 0.1
 
             # watermark loss
             # gt_msgs = msgs[:, :, None, None].float().detach().clone().expand_as(pred_msgs)
@@ -379,11 +379,11 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # noisy_msg_loss = F.binary_cross_entropy_with_logits(pred_noisy_msgs, gt_msgs)
 
             # tamper loss
-            mask_loss = 0.5 * weighted_binary_cross_entropy(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone()) + \
-                        0.5 * dice_loss(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone())
+            mask_loss = 0.2 * weighted_binary_cross_entropy(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone()) + \
+                        0.8 * dice_loss(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone())
 
-            noisy_mask_loss = 0.5 * weighted_binary_cross_entropy(pred_noisy_mask, F.interpolate(random_masks, (pred_noisy_mask.size(2), pred_noisy_mask.size(3))).detach().clone()) + \
-                        0.5 * dice_loss(pred_noisy_mask, F.interpolate(random_masks, (pred_noisy_mask.size(2), pred_noisy_mask.size(3))).detach().clone())
+            noisy_mask_loss = 0.2 * weighted_binary_cross_entropy(pred_noisy_mask, F.interpolate(random_masks, (pred_noisy_mask.size(2), pred_noisy_mask.size(3))).detach().clone()) + \
+                        0.8 * dice_loss(pred_noisy_mask, F.interpolate(random_masks, (pred_noisy_mask.size(2), pred_noisy_mask.size(3))).detach().clone())
 
             # total loss
             # loss = mae_loss + lpips_loss + msg_loss + mask_loss
@@ -503,7 +503,7 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                 random_masks = torch.stack(random_masks_, dim=0)
 
                 null_prompt = [""]*images.size(0)
-                
+
                 latents = original_vae.encode(images).latent_dist.sample()
                 decode_images = original_vae.decode(latents, return_dict=False)[0]
             
