@@ -90,7 +90,6 @@ class MoEGuidedForensicNet(nn.Module):
             nn.GELU(),
             nn.Conv2d(256, dec_dim, kernel_size=1),
         )
-        self.msg_layer = nn.Conv2d(dec_dim, out_chans, kernel_size=1)
         self.mask_layer = nn.Conv2d(dec_dim, 1, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -115,10 +114,9 @@ class MoEGuidedForensicNet(nn.Module):
         
         # Upsample to original image size and make final prediction
         upsampled_features = F.interpolate(decoded_features, size=original_size, mode='bilinear', align_corners=False)
-        msg = self.msg_layer(upsampled_features)
         mask = self.mask_layer(upsampled_features)
         
-        return mask, msg
+        return mask
 
 # class MoEGuidedForensicNet(nn.Module):
 #     """

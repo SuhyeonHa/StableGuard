@@ -238,7 +238,7 @@ def main():
         torch_dtype=torch.float16,
         safety_checker=None,
         cache_dir=args.cache_dir,
-    )
+    ).to(accelerator.device)
 
     original_vae = original_vae.to(accelerator.device, dtype=weight_dtype)
     lpips = lpips.to(accelerator.device)
@@ -322,10 +322,10 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                     else:
                         msgs_.append(msg)
 
-                    if random.random() < 0.1: # fully untamper mask
-                        random_masks_.append(torch.zeros_like(random_mask))
-                    else:
-                        random_masks_.append(random_mask)
+                    # if random.random() < 0.1: # fully untamper mask
+                    #     random_masks_.append(torch.zeros_like(random_mask))
+                    # else:
+                    #     random_masks_.append(random_mask)
                 msgs = torch.stack(msgs_, dim=0)
                 random_masks = torch.stack(random_masks_, dim=0)
 
@@ -360,20 +360,20 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # add_quantization
             tamper_images = round_pixel(tamper_images)
-            pred_mask, pred_msgs = moe_gfn(tamper_images.to(dtype=weight_dtype))
+            pred_mask = moe_gfn(tamper_images.to(dtype=weight_dtype))
 
             tamper_noisy_images = round_pixel(tamper_noisy_images)
-            pred_noisy_mask, pred_noisy_msgs = moe_gfn(tamper_noisy_images.to(dtype=weight_dtype))
+            pred_noisy_mask = moe_gfn(tamper_noisy_images.to(dtype=weight_dtype))
 
             # Loss
             # similarity loss
-            lpips_loss = 0.5 * lpips(cover_images, images.float().detach().clone()).mean() # 0.1
-            mae_loss = 0.5 * F.l1_loss(cover_images, images.float().detach().clone()) # 0.1
+            lpips_loss = 0.1 * lpips(cover_images, images.float().detach().clone()).mean() # 0.1
+            mae_loss = 0.1 * F.l1_loss(cover_images, images.float().detach().clone()) # 0.1
 
             # watermark loss
-            gt_msgs = msgs[:, :, None, None].float().detach().clone().expand_as(pred_msgs)
-            msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, gt_msgs)
-            noisy_msg_loss = F.binary_cross_entropy_with_logits(pred_noisy_msgs, gt_msgs)
+            # gt_msgs = msgs[:, :, None, None].float().detach().clone().expand_as(pred_msgs)
+            # msg_loss = F.binary_cross_entropy_with_logits(pred_msgs, gt_msgs)
+            # noisy_msg_loss = F.binary_cross_entropy_with_logits(pred_noisy_msgs, gt_msgs)
 
             # tamper loss
             mask_loss = 0.5 * weighted_binary_cross_entropy(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone()) + \
@@ -388,23 +388,23 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             #     loss = mae_loss + lpips_loss + mask_loss
             # else:
             #     loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss
-            loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss + msg_loss + noisy_msg_loss
+            loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss #+ msg_loss + noisy_msg_loss
 
             # for bit acc
-            pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
-            pred_noisy_msgs_bin = torch.round(torch.sigmoid(pred_noisy_msgs))
-            msgs_bin = torch.round(torch.sigmoid(msgs.squeeze(1)))
+            # pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
+            # pred_noisy_msgs_bin = torch.round(torch.sigmoid(pred_noisy_msgs))
+            # msgs_bin = torch.round(torch.sigmoid(msgs.squeeze(1)))
 
             # Gather the losses across all processes for logging (if we use distributed training).
             avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean().item()
-            avg_msg_loss = accelerator.gather(msg_loss.repeat(args.train_batch_size)).mean().item()
-            avg_noisy_msg_loss = accelerator.gather(noisy_msg_loss.repeat(args.train_batch_size)).mean().item()
+            # avg_msg_loss = accelerator.gather(msg_loss.repeat(args.train_batch_size)).mean().item()
+            # avg_noisy_msg_loss = accelerator.gather(noisy_msg_loss.repeat(args.train_batch_size)).mean().item()
             avg_mask_loss = accelerator.gather(mask_loss.repeat(args.train_batch_size)).mean().item()
             avg_noisy_mask_loss = accelerator.gather(noisy_mask_loss.repeat(args.train_batch_size)).mean().item()
             avg_mae_loss = accelerator.gather(mae_loss.repeat(args.train_batch_size)).mean().item()
             avg_lpips_loss = accelerator.gather(lpips_loss.repeat(args.train_batch_size)).mean().item()
-            avg_bit_correct = accelerator.gather(((pred_msgs_bin.eq(msgs_bin.data[:, :, None, None])).float().mean()) / (args.train_batch_size * args.num_bits)).mean().item()
-            avg_noisy_bit_correct = accelerator.gather(((pred_noisy_msgs_bin.eq(msgs_bin.data[:, :, None, None])).float().mean()) / (args.train_batch_size * args.num_bits)).mean().item()
+            # avg_bit_correct = accelerator.gather(((pred_msgs_bin.eq(msgs_bin.data[:, :, None, None])).float().mean()) / (args.train_batch_size * args.num_bits)).mean().item()
+            # avg_noisy_bit_correct = accelerator.gather(((pred_noisy_msgs_bin.eq(msgs_bin.data[:, :, None, None])).float().mean()) / (args.train_batch_size * args.num_bits)).mean().item()
             
             accelerator.backward(loss)
 
@@ -417,11 +417,11 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             if accelerator.is_main_process:
                 writer.add_scalar("LR", lr, global_step)
-                writer.add_scalar("Loss/bit_correct", avg_bit_correct, global_step)
-                writer.add_scalar("Loss/noisy_bit_correct", avg_noisy_bit_correct, global_step)
+                # writer.add_scalar("Loss/bit_correct", avg_bit_correct, global_step)
+                # writer.add_scalar("Loss/noisy_bit_correct", avg_noisy_bit_correct, global_step)
                 writer.add_scalar("Loss/total_loss", avg_loss, global_step)
-                writer.add_scalar("Loss/msg_loss", avg_msg_loss, global_step)
-                writer.add_scalar("Loss/noisy_msg_loss", avg_noisy_msg_loss, global_step)
+                # writer.add_scalar("Loss/msg_loss", avg_msg_loss, global_step)
+                # writer.add_scalar("Loss/noisy_msg_loss", avg_noisy_msg_loss, global_step)
                 writer.add_scalar("Loss/mask_loss", avg_mask_loss, global_step)
                 writer.add_scalar("Loss/noisy_mask_loss", avg_noisy_mask_loss, global_step)
                 writer.add_scalar("Loss/lpips_loss", avg_lpips_loss, global_step)
@@ -435,14 +435,14 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                         f"{'Step Time:'}{step_time:6.3f} | "
                         f"{'LR:'}{lr:6.6f} | "
                         f"{'Step Loss:'}{avg_loss:6.3f} | "
-                        f"{'Msg Loss:'}{avg_msg_loss:6.3f} | "
-                        f"{'Noisy Msg Loss:'}{avg_noisy_msg_loss:6.3f} | "
+                        # f"{'Msg Loss:'}{avg_msg_loss:6.3f} | "
+                        # f"{'Noisy Msg Loss:'}{avg_noisy_msg_loss:6.3f} | "
                         f"{'Mask Loss:'}{avg_mask_loss:6.3f} | "
                         f"{'Noisy Mask Loss:'}{avg_noisy_mask_loss:6.3f} | "
                         f"{'LPIPS Loss:'}{avg_lpips_loss:6.3f} | "
                         f"{'MAE Loss:'}{avg_mae_loss:6.3f} | "
-                        f"{'Bit Correct:'}{avg_bit_correct:6.3f} | "
-                        f"{'Noisy Bit Correct:'}{avg_noisy_bit_correct:6.3f}"
+                        # f"{'Bit Correct:'}{avg_bit_correct:6.3f} | "
+                        # f"{'Noisy Bit Correct:'}{avg_noisy_bit_correct:6.3f}"
                     )
                     print(msg)
                     logger.info(msg)
@@ -501,7 +501,7 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
 
                 null_prompt = [""]*images.size(0)
             
-            cover_images, _ = mpw_vae_decoder(images, secret=msgs, vae=original_vae)
+            cover_images = mpw_vae_decoder(images, secret=msgs, vae=original_vae)
 
             inpainted_images = inpaint_pipeline(
                 prompt=null_prompt, 
@@ -517,12 +517,12 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             
             spliced = random_masks * spliceless.detach().clone() + (1 - random_masks) * cover_images # [-1, 1]
 
-            mask_spliceless, msgs_spliceless = moe_gfn(spliceless.to(dtype=weight_dtype))
-            mask_spliced, msgs_spliced = moe_gfn(spliced.to(dtype=weight_dtype))
+            mask_spliceless = moe_gfn(spliceless.to(dtype=weight_dtype))
+            mask_spliced = moe_gfn(spliced.to(dtype=weight_dtype))
 
-            msgs_spliceless_bin = torch.round(torch.sigmoid(msgs_spliceless)) # [B, num_bits, H, W]
-            msgs_spliced_bin = torch.round(torch.sigmoid(msgs_spliced)) # [B, num_bits, H, W]
-            msgs_bin = torch.round(torch.sigmoid(msgs.squeeze(1))) # [B, num_bits]
+            # msgs_spliceless_bin = torch.round(torch.sigmoid(msgs_spliceless)) # [B, num_bits, H, W]
+            # msgs_spliced_bin = torch.round(torch.sigmoid(msgs_spliced)) # [B, num_bits, H, W]
+            # msgs_bin = torch.round(torch.sigmoid(msgs.squeeze(1))) # [B, num_bits]
 
             # Spliceless (Inpaint)
             f1_sl = f1_metric.batch_update(predict=mask_spliceless, mask=gt_mask)
@@ -541,8 +541,8 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             lpips_loss = lpips(cover_images, images.float().detach().clone()).mean()
             psnr = 10 * torch.log10(1 / F.mse_loss(cover_images, images.float().detach().clone()))
 
-            avg_bit_correct_spliceless += accelerator.gather((msgs_spliceless_bin.eq(msgs_bin.data[:, :, None, None]).float().mean()) / (args.train_batch_size * args.num_bits)).mean().item()
-            avg_bit_correct_spliced += accelerator.gather((msgs_spliced_bin.eq(msgs_bin.data[:, :, None, None]).float().mean()) / (args.train_batch_size * args.num_bits)).mean().item()
+            # avg_bit_correct_spliceless += accelerator.gather((msgs_spliceless_bin.eq(msgs_bin.data[:, :, None, None]).float().mean()) / (args.train_batch_size * args.num_bits)).mean().item()
+            # avg_bit_correct_spliced += accelerator.gather((msgs_spliced_bin.eq(msgs_bin.data[:, :, None, None]).float().mean()) / (args.train_batch_size * args.num_bits)).mean().item()
 
             # Spliceless
             total_f1_spliceless += accelerator.gather(f1_sl.repeat(args.train_batch_size)).mean().item()
@@ -584,10 +584,10 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             avg_psnr,
             avg_lpips / (step + 1)
         )
-        msg += "Bit Correct - Spliceless: {:.3f}, Spliced: {:.3f} \n".format(
-            avg_bit_correct_spliceless / (step + 1),
-            avg_bit_correct_spliced / (step + 1)
-        )
+        # msg += "Bit Correct - Spliceless: {:.3f}, Spliced: {:.3f} \n".format(
+        #     avg_bit_correct_spliceless / (step + 1),
+        #     avg_bit_correct_spliced / (step + 1)
+        # )
         print(msg)
         logger.info(msg)
         

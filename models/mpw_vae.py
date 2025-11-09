@@ -112,6 +112,24 @@ class ConditionAdaptor(nn.Module):
         out = self.secret_dense2(out)
         out = out.reshape(-1, 3, 32, 32)
         return out
+
+class FusionBlock(nn.Module):
+    def __init__(self, h: int, w: int, c: int, out_c: int):
+        super().__init__()
+        self.watermark_map = nn.Parameter(torch.randn(1, c, h, w))
+
+        in_ch = c * 3 # sample_ch + skip_ch + watermark_ch
+        bottleneck_ch = in_ch // 4
+
+        self.fusion_convs = nn.Sequential(
+            nn.Conv2d(in_ch, bottleneck_ch, kernel_size=1),
+            nn.SiLU(),
+            nn.Conv2d(bottleneck_ch, out_ch, kernel_size=1)
+        )
+
+    def forward(self, sample: torch.Tensor, skip_in: torch.Tensor) -> torch.Tensor:
+        combined_input = torch.cat([sample, skip_in, self.watermark_map], dim=1)
+        return self.fusion_convs(combined_input)
     
 
 # class MsgAdapter(nn.Module):
@@ -300,6 +318,8 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         )
         
         latent_h, latent_w = 32, 32
+        fusion_sample_channels = [512, 512, 512, 256] 
+        fusion_skip_channels = [512, 512, 512, 256] 
 
         self.skip_conv_1 = torch.nn.Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=1, bias=True).cuda().requires_grad_(True)
         self.skip_conv_2 = torch.nn.Conv2d(256, 512, kernel_size=(3, 3), stride=(1, 1), padding=1, bias=True).cuda().requires_grad_(True)
@@ -311,22 +331,8 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         torch.nn.init.constant_(self.skip_conv_4.weight, 1e-5)
 
         self.fusion_blocks = nn.ModuleList([])
-        
-        fusion_sample_channels = [512, 512, 512, 256] 
-        fusion_skip_channels = [512, 512, 512, 256] 
-        
-        for i in range(len(up_block_types)):
-            in_ch = fusion_sample_channels[i] + fusion_skip_channels[i] + self.num_bits
-            out_ch = fusion_sample_channels[i]
-            bottleneck_ch = in_ch // 4
-
-            self.fusion_blocks.append(
-                nn.Sequential(
-                    nn.Conv2d(in_ch, bottleneck_ch, kernel_size=1), # Down-sample
-                    nn.SiLU(),
-                    nn.Conv2d(bottleneck_ch, out_ch, kernel_size=1) # Up-sample
-                )
-            )
+        for block_c in fusion_sample_channels:
+            self.fusion_blocks.append(FusionBlock(h=latent_h, w=latent_w, c=block_c, out_c=block_c))
 
         # up
         reversed_block_out_channels = list(reversed(block_out_channels))
@@ -378,7 +384,7 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
     ) -> torch.FloatTensor:
         r"""The forward method of the `Decoder` class."""
 
-        spatial_secret = self.secret_to_map(secret)
+        # spatial_secret = self.secret_to_map(secret)
         
         latents = vae.encode(sample).latent_dist.sample()
         decode_images = vae.decode(latents, return_dict=False)[0] 
@@ -406,12 +412,12 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
             # add skip
             # sample = sample + skip_in
             # fuse skip connection and secret
-            current_h, current_w = sample.shape[2:]
-            secret_expanded = nn.Upsample(size=(current_h, current_w))(spatial_secret)
-            combined_input = torch.cat([sample, skip_in, secret_expanded], dim=1)
-            fusion_out = self.fusion_blocks[idx](combined_input)
-            sample = sample + fusion_out
-
+            # current_h, current_w = sample.shape[2:]
+            # secret_expanded = nn.Upsample(size=(current_h, current_w))(spatial_secret)
+            sample = sample + self.fusion_blocks[idx](sample, skip_in)
+            # combined_input = torch.cat([sample, skip_in, secret_expanded], dim=1)
+            # fusion_out = self.fusion_blocks[idx](combined_input)
+            # sample = sample + fusion_out
 
             sample = up_block(sample, latent_embeds)
 
