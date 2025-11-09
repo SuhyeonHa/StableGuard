@@ -288,7 +288,7 @@ def main():
     accelerator.prepare(mpw_vae_decoder, moe_gfn, optimizer, lr_scheduler, train_dataloader, val_dataloader, inpaint_pipe)
 
     for epoch in range(0, args.num_train_epochs):
-        train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, optimizer, lr_scheduler, lpips, writer, logger)
+        # train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, optimizer, lr_scheduler, lpips, writer, logger)
         val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, inpaint_pipe, lpips, logger)
         save_path = os.path.join(args.output_dir, f"checkpoint-last")
         accelerator.save_state(save_path, safe_serialization=False)
@@ -508,6 +508,7 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
                 decode_images = original_vae.decode(latents, return_dict=False)[0]
             
             cover_images = mpw_vae_decoder(images, secret=msgs, vae=original_vae)
+            cover_images = cover_images.clamp(-1.0, 1.0)
 
             inpainted_images = inpaint_pipeline(
                 prompt=null_prompt, 
@@ -549,6 +550,10 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
 
             # avg_bit_correct_spliceless += accelerator.gather((msgs_spliceless_bin.eq(msgs_bin.data[:, :, None, None]).float().mean()) / (args.train_batch_size * args.num_bits)).mean().item()
             # avg_bit_correct_spliced += accelerator.gather((msgs_spliced_bin.eq(msgs_bin.data[:, :, None, None]).float().mean()) / (args.train_batch_size * args.num_bits)).mean().item()
+            
+            f1_sl, auc_sl, iou_sl, acc_sl, fpr_sl = f1_sl.to(accelerator.device), auc_sl.to(accelerator.device), iou_sl.to(accelerator.device), acc_sl.to(accelerator.device), fpr_sl.to(accelerator.device)
+            f1_sp, auc_sp, iou_sp, acc_sp, fpr_sp = f1_sp.to(accelerator.device), auc_sp.to(accelerator.device), iou_sp.to(accelerator.device), acc_sp.to(accelerator.device), fpr_sp.to(accelerator.device)
+            lpips_loss, psnr = lpips_loss.to(accelerator.device), psnr.to(accelerator.device)
 
             # Spliceless
             total_f1_spliceless += accelerator.gather(f1_sl.repeat(args.train_batch_size)).mean().item()
