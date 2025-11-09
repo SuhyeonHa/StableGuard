@@ -325,7 +325,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                     # if random.random() < 0.1: # fully untamper mask
                     #     random_masks_.append(torch.zeros_like(random_mask))
                     # else:
-                    #     random_masks_.append(random_mask)
+                    random_masks_.append(random_mask)
                 msgs = torch.stack(msgs_, dim=0)
                 random_masks = torch.stack(random_masks_, dim=0)
 
