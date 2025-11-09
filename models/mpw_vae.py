@@ -114,11 +114,11 @@ class ConditionAdaptor(nn.Module):
         return out
 
 class FusionBlock(nn.Module):
-    def __init__(self, h: int, w: int, c: int, out_c: int):
+    def __init__(self, h: int, w: int, ch: int, out_ch: int):
         super().__init__()
         self.watermark_map = nn.Parameter(torch.randn(1, c, h, w))
 
-        in_ch = c * 3 # sample_ch + skip_ch + watermark_ch
+        in_ch = ch * 3 # sample_ch + skip_ch + watermark_ch
         bottleneck_ch = in_ch // 4
 
         self.fusion_convs = nn.Sequential(
@@ -332,7 +332,7 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
 
         self.fusion_blocks = nn.ModuleList([])
         for block_c in fusion_sample_channels:
-            self.fusion_blocks.append(FusionBlock(h=latent_h, w=latent_w, c=block_c, out_c=block_c))
+            self.fusion_blocks.append(FusionBlock(h=latent_h, w=latent_w, ch=block_c, out_ch=block_c))
 
         # up
         reversed_block_out_channels = list(reversed(block_out_channels))
