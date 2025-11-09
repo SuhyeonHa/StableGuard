@@ -128,7 +128,8 @@ class FusionBlock(nn.Module):
         )
 
     def forward(self, sample: torch.Tensor, skip_in: torch.Tensor) -> torch.Tensor:
-        combined_input = torch.cat([sample, skip_in, self.watermark_map], dim=1)
+        watermark_map = self.watermark_map.repeat(sample.size(0), 1, 1, 1)
+        combined_input = torch.cat([sample, skip_in, watermark_map], dim=1)
         return self.fusion_convs(combined_input)
     
 
@@ -331,8 +332,6 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         torch.nn.init.constant_(self.skip_conv_4.weight, 1e-5)
 
         self.fusion_blocks = nn.ModuleList([])
-        for block_c in fusion_sample_channels:
-            self.fusion_blocks.append(FusionBlock(h=latent_h, w=latent_w, ch=block_c, out_ch=block_c))
 
         # up
         reversed_block_out_channels = list(reversed(block_out_channels))
@@ -358,6 +357,8 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
             )
             self.up_blocks.append(up_block)
             prev_output_channel = output_channel
+
+            self.fusion_blocks.append(FusionBlock(h=latent_h, w=latent_w, ch=fusion_sample_channels[i], out_ch=fusion_sample_channels[i]))
 
             # double the latent size after each upsampling
             if not is_final_block:
