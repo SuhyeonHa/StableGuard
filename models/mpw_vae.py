@@ -388,7 +388,6 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
         # spatial_secret = self.secret_to_map(secret)
         
         latents = vae.encode(sample).latent_dist.sample()
-        decode_images = vae.decode(latents, return_dict=False)[0] 
         latents = vae.post_quant_conv(latents) # to process for another model (not sd-vae)
 
         feature_maps = vae.encoder.current_down_blocks
@@ -434,4 +433,4 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
             sample = self.conv_norm_out(sample, latent_embeds)
         sample = self.conv_act(sample)
         sample = self.conv_out(sample)
-        return sample, decode_images
+        return sample
