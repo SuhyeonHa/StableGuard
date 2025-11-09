@@ -90,28 +90,28 @@ class Conv2D(nn.Module):
                 raise NotImplementedError
         return outputs
     
-class ConditionAdaptor(nn.Module):
-    def __init__(self):
-        super(ConditionAdaptor, self).__init__()
-        self.secret_dense1 = Dense(3, 32 * 32, activation='relu') 
-        self.secret_dense2 = Dense(32 * 32, 3 * 32 * 32, activation='relu')
-        # self.secret_conv1 = Conv2D(3, 3, 3, activation='relu')
-        # self.conv1 = Conv2D(3, 3, 3, activation='relu')
-        # self.conv2 = Conv2D(3, 3, 1, activation=None)
+# class ConditionAdaptor(nn.Module):
+#     def __init__(self):
+#         super(ConditionAdaptor, self).__init__()
+#         self.secret_dense1 = Dense(3, 32 * 32, activation='relu') 
+#         self.secret_dense2 = Dense(32 * 32, 3 * 32 * 32, activation='relu')
+#         # self.secret_conv1 = Conv2D(3, 3, 3, activation='relu')
+#         # self.conv1 = Conv2D(3, 3, 3, activation='relu')
+#         # self.conv2 = Conv2D(3, 3, 1, activation=None)
     
-    def forward(self, secret):
-        # B, C, H, W = img_feature.shape
-        # secret = 2 * (secret - .5) # normalize to [-1, 1]
-        # secret_map = secret.view(B, -1, 1, 1).repeat(1, 1, H, W)
+#     def forward(self, secret):
+#         # B, C, H, W = img_feature.shape
+#         # secret = 2 * (secret - .5) # normalize to [-1, 1]
+#         # secret_map = secret.view(B, -1, 1, 1).repeat(1, 1, H, W)
 
-        # inputs = torch.cat([secret_map, img_feature], dim=1)
-        # inputs = img_feature + secret_map
-        # conv1 = self.conv1(inputs) 
-        # conv2 = self.conv2(conv1) 
-        out = self.secret_dense1(secret)
-        out = self.secret_dense2(out)
-        out = out.reshape(-1, 3, 32, 32)
-        return out
+#         # inputs = torch.cat([secret_map, img_feature], dim=1)
+#         # inputs = img_feature + secret_map
+#         # conv1 = self.conv1(inputs) 
+#         # conv2 = self.conv2(conv1) 
+#         out = self.secret_dense1(secret)
+#         out = self.secret_dense2(out)
+#         out = out.reshape(-1, 3, 32, 32)
+#         return out
 
 class FusionBlock(nn.Module):
     def __init__(self, h: int, w: int, ch: int, out_ch: int):
@@ -288,7 +288,7 @@ class MultiplexingWatermarkVAEDecoder(nn.Module):
     ):
         super().__init__()
         self.layers_per_block = layers_per_block
-        self.secret_to_map = ConditionAdaptor()
+        # self.secret_to_map = ConditionAdaptor()
 
         self.conv_in = nn.Conv2d(
             in_channels,
