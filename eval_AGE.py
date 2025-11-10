@@ -30,6 +30,8 @@ from omniguard.modules.Unet_common import DWT, IWT
 from omniguard.iml_vit_model import iml_vit_model
 from albumentations.pytorch import ToTensorV2
 
+from models.mpw_vae import _get_feature_maps
+
 def set_seed(seed: int = 42):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
@@ -269,6 +271,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
     original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suheyon/caches/')
     pipe = StableDiffusionInpaintPipeline.from_pretrained(edit_model_name, cache_dir='/mnt/nas5/suhyeon/caches/')
     generator = torch.Generator().manual_seed(42)
+    pipe = pipe.to("cuda")
 
     # disables safety checks
     def disabled_safety_checker(images, clip_input):
@@ -303,6 +306,11 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         mpw_vae_decoder = mpw_vae_decoder.cuda()
         original_vae.eval()
         mpw_vae_decoder.eval()
+
+        original_vae.encoder.forward = _get_feature_maps.__get__(
+        original_vae.encoder, 
+        original_vae.encoder.__class__
+    )
 
     elif target_model == "wam":
         wam = load_model_from_checkpoint(weight_path, num_bits).cuda().eval()
@@ -374,14 +382,14 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             decode_images = original_vae.decode(latents, return_dict=False)[0]
 
             # prepare latents for the watermark decoder (post-quant conv if required by model)
-            latents = original_vae.post_quant_conv(latents)
+            # latents = original_vae.post_quant_conv(latents)
 
             # sample random binary messages for this batch
             phi = torch.empty(latents.size(0), num_bits).uniform_(0, 1).cuda()
             msgs = (torch.bernoulli(phi) + 1e-8)  # small eps to avoid exact zeros if needed
 
             # produce watermarked cover images from latents+msgs
-            cover_images = mpw_vae_decoder(latents)
+            cover_images = mpw_vae_decoder(images, secret=msgs, vae=original_vae)
             # cover_images = cover_images * 2.0 - 1.0
 
         elif target_model == "wam":
