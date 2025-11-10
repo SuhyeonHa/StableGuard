@@ -160,6 +160,8 @@ def parse_args():
                     help="VAE decoder noise strength (e.g., --noise_strength 0.1 0.5)")
     parser.add_argument("--cache_dir", type=str, default=None, help="Path to a directory to store the pretrained models downloaded from huggingface")
     parser.add_argument("--seed", type=int, default=42, help="A seed for reproducible training.")
+    parser.add_argument("--num_inference_steps_train", type=int, default=20, help="Number of inference steps during training.")
+    parser.add_argument("--guidance_scale", type=float, default=7.5, help="Guidance scale for classifier-free guidance.")
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -288,19 +290,21 @@ def main():
     accelerator.prepare(mpw_vae_decoder, moe_gfn, optimizer, lr_scheduler, train_dataloader, val_dataloader, inpaint_pipe)
 
     for epoch in range(0, args.num_train_epochs):
-        train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, optimizer, lr_scheduler, lpips, writer, logger)
+        train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, inpaint_pipe, optimizer, lr_scheduler, lpips, writer, logger)
         val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, inpaint_pipe, lpips, logger)
         save_path = os.path.join(args.output_dir, f"checkpoint-last")
         accelerator.save_state(save_path, safe_serialization=False)
 
 
-def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, optimizer, lr_scheduler, lpips, writer, logger):
+def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, inpaint_pipe, optimizer, lr_scheduler, lpips, writer, logger):
     mpw_vae_decoder.train()
     moe_gfn.train()
     original_vae.train()
     global global_step
     begin = time.perf_counter()
     set_seed(args.seed)
+
+    noise_generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
 
     for step, batch in enumerate(train_dataloader):
         lr = lr_scheduler.get_last_lr()[0]
@@ -336,10 +340,66 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             cover_images = mpw_vae_decoder(images, secret=msgs, vae=original_vae)
 
             with torch.no_grad():
-                cover_latents = original_vae.encode(cover_images).latent_dist.sample()
-                rand_strength = random.uniform(args.noise_strength[0], args.noise_strength[1])
-                noise = torch.randn_like(cover_latents) * rand_strength
-                noisy_images = original_vae.decode(cover_latents + noise, return_dict=False)[0]
+
+                # visualize
+                # timesteps_to_visualize = list(range(0, 1000, 100)) + [999]
+                # all_noisy_images = []
+                # for t_val in tqdm(timesteps_to_visualize):
+
+                orig_dtype = cover_images.dtype
+                pipe_dtype = inpaint_pipe.unet.dtype
+
+                cover_latents = original_vae.encode(cover_images).latent_dist.sample().to(dtype=pipe_dtype)
+                prompt_embeds = inpaint_pipe._encode_prompt([""], accelerator.device, 1, True, None).to(dtype=pipe_dtype)
+                prompt_embeds = torch.cat([prompt_embeds[0].expand(images.size(0), -1, -1),
+                                                    prompt_embeds[1].expand(images.size(0), -1, -1)], dim=0)
+                inpaint_pipe.scheduler.set_timesteps(args.num_inference_steps_train, device=accelerator.device)
+
+                timesteps = torch.randint(low=200, high=600, size=(images.size(0),), device=accelerator.device)
+                # timesteps = torch.tensor([t_val] * images.size(0), device=accelerator.device)
+                epsilon = torch.randn(cover_latents.shape, generator=noise_generator, device=accelerator.device, dtype=pipe_dtype)
+                noisy_latents = inpaint_pipe.scheduler.add_noise(cover_latents, epsilon, timesteps)
+
+                latent_model_input = torch.cat([noisy_latents] * 2)
+                latent_model_input = inpaint_pipe.scheduler.scale_model_input(latent_model_input, timesteps)
+
+                down_masks = F.interpolate(random_masks, size=(cover_latents.shape[2], cover_latents.shape[3]))
+                down_masks = (down_masks > 0.5).to(dtype=pipe_dtype)
+                unet_mask = torch.cat([(down_masks)] * 2)
+                unet_context = torch.cat([cover_latents * (1-down_masks)] * 2)
+                latent_model_input = torch.cat([latent_model_input, unet_mask, unet_context], dim=1).to(dtype=pipe_dtype)
+                
+                realistic_noise_pred = inpaint_pipe.unet(latent_model_input, torch.cat([timesteps] * 2), encoder_hidden_states=prompt_embeds, return_dict=False)[0]
+                
+                noise_pred_uncond, noise_pred_text = realistic_noise_pred.chunk(2)
+                realistic_noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_text - noise_pred_uncond)
+
+                # 4. DDIM Inversion
+                alpha_prod_t = inpaint_pipe.scheduler.alphas_cumprod[timesteps].to(device=noisy_latents.device, dtype=pipe_dtype)
+                alpha_prod_t = alpha_prod_t.view(-1, 1, 1, 1)
+
+                sqrt_alpha_prod_t = alpha_prod_t ** 0.5
+                sqrt_one_minus_alpha_prod_t = (1 - alpha_prod_t) ** 0.5
+
+                attacked_latent = (noisy_latents - sqrt_one_minus_alpha_prod_t * realistic_noise_pred) / sqrt_alpha_prod_t
+                noisy_images = original_vae.decode(attacked_latent.to(dtype=orig_dtype), return_dict=False)[0]
+                # all_noisy_images.append(noisy_images.to(dtype=orig_dtype))
+
+                # if accelerator.is_main_process:
+                #     images_to_save = []
+                #     images_to_save.append(cover_images[2].detach().clone())
+                #     images_to_save.append(random_masks[2].detach().clone().repeat(3, 1, 1))
+                #     for img in all_noisy_images:
+                #         images_to_save.append(img[2].detach().clone())
+                #     result_images = torch.stack(images_to_save)
+                    
+                #     save_image(
+                #         result_images, 
+                #         os.path.join(f'epoch_{epoch}_step_attack_viz.jpg'), 
+                #         normalize=True, 
+                #         scale_each=True, 
+                #         nrow=len(images_to_save)
+                #     )
 
             # random splicing
             rand_num = random.random()
@@ -354,12 +414,14 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
                 # tamper_images = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
 
-            if rand_num <= 0.5:
-                tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
-                # tamper_noisy_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * noisy_images # invert
-            elif rand_num > 0.5:
-                tamper_noisy_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
-                # tamper_noisy_images = (1 - random_masks) * images.detach().clone() + random_masks * noisy_images # invert
+            tamper_noisy_images = noisy_images.clone()
+
+            # if rand_num <= 0.5:
+            #     tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
+            #     # tamper_noisy_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * noisy_images # invert
+            # elif rand_num > 0.5:
+            #     tamper_noisy_images = random_masks * images.detach().clone() + (1 - random_masks) * noisy_images
+            #     # tamper_noisy_images = (1 - random_masks) * images.detach().clone() + random_masks * noisy_images # invert
 
             # add_quantization
             tamper_images = round_pixel(tamper_images)
