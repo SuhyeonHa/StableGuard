@@ -355,7 +355,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                                                     prompt_embeds[1].expand(images.size(0), -1, -1)], dim=0)
                 inpaint_pipe.scheduler.set_timesteps(args.num_inference_steps_train, device=accelerator.device)
 
-                timesteps = torch.randint(low=200, high=600, size=(images.size(0),), device=accelerator.device)
+                timesteps = torch.randint(low=50, high=300, size=(images.size(0),), device=accelerator.device)
                 # timesteps = torch.tensor([t_val] * images.size(0), device=accelerator.device)
                 epsilon = torch.randn(cover_latents.shape, generator=noise_generator, device=accelerator.device, dtype=pipe_dtype)
                 noisy_latents = inpaint_pipe.scheduler.add_noise(cover_latents, epsilon, timesteps)
