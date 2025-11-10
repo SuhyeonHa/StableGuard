@@ -609,8 +609,8 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             spliced[:args.train_batch_size],
             spliceless[:args.train_batch_size],
             random_masks.repeat(1, 3, 1, 1)[:args.train_batch_size], 
-            F.sigmoid(F.interpolate(mask_spliceless, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size],
-            F.sigmoid(F.interpolate(mask_spliced, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size]
+            F.sigmoid(F.interpolate(mask_spliced, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size],
+            F.sigmoid(F.interpolate(mask_spliceless, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size]
             ], dim=0).detach().clone()
         
         save_image(result_images, os.path.join(args.output_dir, 'images/test', '%s.jpg' % epoch), normalize=True, scale_each=True, nrow=args.train_batch_size)
