@@ -344,46 +344,46 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 # timesteps_to_visualize = list(range(0, 1000, 100)) + [999]
                 # all_noisy_images = []
                 # for t_val in tqdm(timesteps_to_visualize):
+            with torch.no_grad():
+                orig_dtype = cover_images.dtype
+                pipe_dtype = inpaint_pipe.unet.dtype
 
-            orig_dtype = cover_images.dtype
-            pipe_dtype = inpaint_pipe.unet.dtype
+                cover_latents = original_vae.encode(cover_images).latent_dist.sample().to(dtype=pipe_dtype)
+                down_masks = F.interpolate(random_masks, size=(cover_latents.shape[2], cover_latents.shape[3]), mode="nearest")
+                down_masks = (down_masks > 0.5).to(dtype=pipe_dtype)
 
-            cover_latents = original_vae.encode(cover_images).latent_dist.sample().to(dtype=pipe_dtype)
-            down_masks = F.interpolate(random_masks, size=(cover_latents.shape[2], cover_latents.shape[3]), mode="nearest")
-            down_masks = (down_masks > 0.5).to(dtype=pipe_dtype)
+                spliced_latents = down_masks * latents + (1 - down_masks) * cover_latents
+                prompt_embeds = inpaint_pipe._encode_prompt([""], accelerator.device, 1, True, None).to(dtype=pipe_dtype)
+                prompt_embeds = torch.cat([prompt_embeds[0].expand(images.size(0), -1, -1),
+                                                    prompt_embeds[1].expand(images.size(0), -1, -1)], dim=0)
+                inpaint_pipe.scheduler.set_timesteps(args.num_inference_steps_train, device=accelerator.device)
 
-            spliced_latents = down_masks * latents + (1 - down_masks) * cover_latents
-            prompt_embeds = inpaint_pipe._encode_prompt([""], accelerator.device, 1, True, None).to(dtype=pipe_dtype)
-            prompt_embeds = torch.cat([prompt_embeds[0].expand(images.size(0), -1, -1),
-                                                prompt_embeds[1].expand(images.size(0), -1, -1)], dim=0)
-            inpaint_pipe.scheduler.set_timesteps(args.num_inference_steps_train, device=accelerator.device)
+                timesteps = torch.randint(low=200, high=600, size=(images.size(0),), device=accelerator.device)
+                # timesteps = torch.tensor([t_val] * images.size(0), device=accelerator.device)
+                epsilon = torch.randn(cover_latents.shape, generator=noise_generator, device=accelerator.device, dtype=pipe_dtype)
+                noisy_latents = inpaint_pipe.scheduler.add_noise(cover_latents, epsilon, timesteps)
 
-            timesteps = torch.randint(low=200, high=600, size=(images.size(0),), device=accelerator.device)
-            # timesteps = torch.tensor([t_val] * images.size(0), device=accelerator.device)
-            epsilon = torch.randn(cover_latents.shape, generator=noise_generator, device=accelerator.device, dtype=pipe_dtype)
-            noisy_latents = inpaint_pipe.scheduler.add_noise(cover_latents, epsilon, timesteps)
+                latent_model_input = torch.cat([noisy_latents] * 2)
+                latent_model_input = inpaint_pipe.scheduler.scale_model_input(latent_model_input, timesteps)
 
-            latent_model_input = torch.cat([noisy_latents] * 2)
-            latent_model_input = inpaint_pipe.scheduler.scale_model_input(latent_model_input, timesteps)
+                unet_mask = torch.cat([down_masks] * 2)
+                unet_context = torch.cat([spliced_latents] * 2)
+                latent_model_input = torch.cat([latent_model_input, unet_mask, unet_context], dim=1).to(dtype=pipe_dtype)
+                
+                realistic_noise_pred = inpaint_pipe.unet(latent_model_input, torch.cat([timesteps] * 2), encoder_hidden_states=prompt_embeds, return_dict=False)[0]
+                
+                noise_pred_uncond, noise_pred_text = realistic_noise_pred.chunk(2)
+                realistic_noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-            unet_mask = torch.cat([down_masks] * 2)
-            unet_context = torch.cat([spliced_latents] * 2)
-            latent_model_input = torch.cat([latent_model_input, unet_mask, unet_context], dim=1).to(dtype=pipe_dtype)
-            
-            realistic_noise_pred = inpaint_pipe.unet(latent_model_input, torch.cat([timesteps] * 2), encoder_hidden_states=prompt_embeds, return_dict=False)[0]
-            
-            noise_pred_uncond, noise_pred_text = realistic_noise_pred.chunk(2)
-            realistic_noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_text - noise_pred_uncond)
+                # DDIM Inversion
+                alpha_prod_t = inpaint_pipe.scheduler.alphas_cumprod[timesteps].to(device=noisy_latents.device, dtype=pipe_dtype)
+                alpha_prod_t = alpha_prod_t.view(-1, 1, 1, 1)
 
-            # DDIM Inversion
-            alpha_prod_t = inpaint_pipe.scheduler.alphas_cumprod[timesteps].to(device=noisy_latents.device, dtype=pipe_dtype)
-            alpha_prod_t = alpha_prod_t.view(-1, 1, 1, 1)
+                sqrt_alpha_prod_t = alpha_prod_t ** 0.5
+                sqrt_one_minus_alpha_prod_t = (1 - alpha_prod_t) ** 0.5
 
-            sqrt_alpha_prod_t = alpha_prod_t ** 0.5
-            sqrt_one_minus_alpha_prod_t = (1 - alpha_prod_t) ** 0.5
-
-            attacked_latent = (noisy_latents - sqrt_one_minus_alpha_prod_t * realistic_noise_pred) / sqrt_alpha_prod_t
-            noisy_images = original_vae.decode(attacked_latent.to(dtype=orig_dtype), return_dict=False)[0]
+                attacked_latent = (noisy_latents - sqrt_one_minus_alpha_prod_t * realistic_noise_pred) / sqrt_alpha_prod_t
+                noisy_images = original_vae.decode(attacked_latent.to(dtype=orig_dtype), return_dict=False)[0]
             # all_noisy_images.append(noisy_images.to(dtype=orig_dtype))
 
             # if accelerator.is_main_process:
