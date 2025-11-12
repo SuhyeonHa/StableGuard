@@ -250,9 +250,8 @@ def main():
     mpw_vae_decoder = mpw_vae_decoder.to(accelerator.device, dtype=weight_dtype)
 
     ## gradient checkpointing
-    if args.mixed_precision != "no": # only in fp16/bf16
-        mpw_vae_decoder.gradient_checkpointing_enable()
-        moe_gfn.gradient_checkpointing_enable()
+    mpw_vae_decoder.gradient_checkpointing = True
+    moe_gfn.gradient_checkpointing = True
 
     cast_training_params([mpw_vae_decoder])
 
