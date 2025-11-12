@@ -361,7 +361,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             orig_dtype = cover_images.dtype
             pipe_dtype = inpaint_pipe.unet.dtype
 
-            # cover_images = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
+            cover_images = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
             cover_latents = original_vae.encode(cover_images).latent_dist.sample().to(dtype=pipe_dtype)
             cover_latents = cover_latents * original_vae.config.scaling_factor
 
@@ -408,7 +408,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             attacked_latent = current_latent / original_vae.config.scaling_factor
             noisy_images = original_vae.decode(attacked_latent.to(dtype=orig_dtype), return_dict=False)[0]
-            # noisy_images = F.interpolate(noisy_images, size=(args.resolution, args.resolution), mode="bilinear", align_corners=False)
+            noisy_images = F.interpolate(noisy_images, size=(args.resolution, args.resolution), mode="bilinear", align_corners=False)
             # all_noisy_images.append(noisy_images.to(dtype=orig_dtype))
 
             # if accelerator.is_main_process:
