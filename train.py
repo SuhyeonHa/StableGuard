@@ -18,7 +18,7 @@ from diffusers.optimization import get_scheduler
 
 from torch.utils.tensorboard import SummaryWriter
 import logging
-from lpips import LPIPS
+# from lpips import LPIPS
 
 from dataset import CocoDataset, collate_fn
 from losses import WatsonDistanceVgg, weighted_binary_cross_entropy, dice_loss
@@ -185,6 +185,7 @@ def main():
     accelerator_project_config = ProjectConfiguration(project_dir=args.output_dir, logging_dir=logging_dir)
     ddp_kwargs = DistributedDataParallelKwargs(broadcast_buffers=False)
     accelerator = Accelerator(
+        gradient_accumulation_steps=4,
         mixed_precision=args.mixed_precision,
         log_with=args.report_to,
         project_config=accelerator_project_config,
@@ -208,7 +209,7 @@ def main():
     original_vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae")
     mpw_vae_decoder = MultiplexingWatermarkVAEDecoder(num_bits=args.num_bits)
     moe_gfn = MoEGuidedForensicNet()
-    lpips = LPIPS(net="vgg") # WatsonDistanceVgg() both Perceptual loss is ok, WatsonDistanceVgg can get better image quality
+    # lpips = LPIPS(net="vgg") # WatsonDistanceVgg() both Perceptual loss is ok, WatsonDistanceVgg can get better image quality
 
     for name, param in original_vae.decoder.named_parameters():
         if name in mpw_vae_decoder.state_dict():
@@ -242,8 +243,10 @@ def main():
         cache_dir=args.cache_dir,
     ).to(accelerator.device)
 
+    inpaint_pipe.vae = None
+
     original_vae = original_vae.to(accelerator.device, dtype=weight_dtype)
-    lpips = lpips.to(accelerator.device)
+    # lpips = lpips.to(accelerator.device)
     mpw_vae_decoder = mpw_vae_decoder.to(accelerator.device, dtype=weight_dtype)
 
     cast_training_params([mpw_vae_decoder])
@@ -290,13 +293,13 @@ def main():
     accelerator.prepare(mpw_vae_decoder, moe_gfn, optimizer, lr_scheduler, train_dataloader, val_dataloader, inpaint_pipe)
 
     for epoch in range(0, args.num_train_epochs):
-        train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, inpaint_pipe, optimizer, lr_scheduler, lpips, writer, logger)
-        val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, inpaint_pipe, lpips, logger)
+        train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, inpaint_pipe, optimizer, lr_scheduler, writer, logger)
+        val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, inpaint_pipe, logger)
         save_path = os.path.join(args.output_dir, f"checkpoint-last")
         accelerator.save_state(save_path, safe_serialization=False)
 
 
-def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, inpaint_pipe, optimizer, lr_scheduler, lpips, writer, logger):
+def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, inpaint_pipe, optimizer, lr_scheduler, writer, logger):
     mpw_vae_decoder.train()
     moe_gfn.train()
     original_vae.eval()
@@ -459,7 +462,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # Loss
             # similarity loss
             # lpips_loss = lpips(cover_images, images.float().detach().clone()).mean() # 0.1
-            lpips_loss = torch.tensor(0.0, device=accelerator.device, dtype=weight_dtype)
+            # lpips_loss = torch.tensor(0.0, device=accelerator.device, dtype=weight_dtype)
             mae_loss = F.l1_loss(cover_images, images.float().detach().clone()) # 0.1
 
             # watermark loss
@@ -495,7 +498,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # avg_mask_loss = accelerator.gather(mask_loss.repeat(args.train_batch_size)).mean().item()
             avg_noisy_mask_loss = accelerator.gather(noisy_mask_loss.repeat(args.train_batch_size)).mean().item()
             avg_mae_loss = accelerator.gather(mae_loss.repeat(args.train_batch_size)).mean().item()
-            avg_lpips_loss = accelerator.gather(lpips_loss.repeat(args.train_batch_size)).mean().item()
+            # avg_lpips_loss = accelerator.gather(lpips_loss.repeat(args.train_batch_size)).mean().item()
             # avg_bit_correct = accelerator.gather(((pred_msgs_bin.eq(msgs_bin.data[:, :, None, None])).float().mean()) / (args.train_batch_size * args.num_bits)).mean().item()
             # avg_noisy_bit_correct = accelerator.gather(((pred_noisy_msgs_bin.eq(msgs_bin.data[:, :, None, None])).float().mean()) / (args.train_batch_size * args.num_bits)).mean().item()
             
@@ -517,7 +520,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 # writer.add_scalar("Loss/noisy_msg_loss", avg_noisy_msg_loss, global_step)
                 # writer.add_scalar("Loss/mask_loss", avg_mask_loss, global_step)
                 writer.add_scalar("Loss/noisy_mask_loss", avg_noisy_mask_loss, global_step)
-                writer.add_scalar("Loss/lpips_loss", avg_lpips_loss, global_step)
+                # writer.add_scalar("Loss/lpips_loss", avg_lpips_loss, global_step)
                 writer.add_scalar("Loss/mse_loss", avg_mae_loss, global_step)
                 if step % 10 == 0: # log
                     msg = (
@@ -532,7 +535,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                         # f"{'Noisy Msg Loss:'}{avg_noisy_msg_loss:6.3f} | "
                         # f"{'Mask Loss:'}{avg_mask_loss:6.3f} | "
                         f"{'Noisy Mask Loss:'}{avg_noisy_mask_loss:6.3f} | "
-                        f"{'LPIPS Loss:'}{avg_lpips_loss:6.3f} | "
+                        # f"{'LPIPS Loss:'}{avg_lpips_loss:6.3f} | "
                         f"{'MAE Loss:'}{avg_mae_loss:6.3f} | "
                         # f"{'Bit Correct:'}{avg_bit_correct:6.3f} | "
                         # f"{'Noisy Bit Correct:'}{avg_noisy_bit_correct:6.3f}"
@@ -560,7 +563,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
         begin = time.perf_counter()
 
 @torch.no_grad()
-def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, inpaint_pipeline, lpips, logger):
+def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder, moe_gfn, original_vae, inpaint_pipeline, logger):
     mpw_vae_decoder.eval()
     moe_gfn.eval()
     original_vae.eval()
@@ -636,7 +639,7 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             fpr_sp = f1_metric.Cal_FPR(predict=mask_spliced, mask=gt_mask)
 
             # lpips_loss = lpips(cover_images, images.float().detach().clone()).mean()
-            lpips_loss = torch.tensor(0.0, device=accelerator.device, dtype=weight_dtype)
+            # lpips_loss = torch.tensor(0.0, device=accelerator.device, dtype=weight_dtype)
             psnr = 10 * torch.log10(1 / F.mse_loss(cover_images, images.float().detach().clone()))
 
             # avg_bit_correct_spliceless += accelerator.gather((msgs_spliceless_bin.eq(msgs_bin.data[:, :, None, None]).float().mean()) / (args.train_batch_size * args.num_bits)).mean().item()
@@ -644,7 +647,8 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             
             f1_sl, auc_sl, iou_sl, acc_sl, fpr_sl = f1_sl.to(accelerator.device), auc_sl.to(accelerator.device), iou_sl.to(accelerator.device), acc_sl.to(accelerator.device), fpr_sl.to(accelerator.device)
             f1_sp, auc_sp, iou_sp, acc_sp, fpr_sp = f1_sp.to(accelerator.device), auc_sp.to(accelerator.device), iou_sp.to(accelerator.device), acc_sp.to(accelerator.device), fpr_sp.to(accelerator.device)
-            lpips_loss, psnr = lpips_loss.to(accelerator.device), psnr.to(accelerator.device)
+            # lpips_loss, psnr = lpips_loss.to(accelerator.device), psnr.to(accelerator.device)
+            psnr = psnr.to(accelerator.device)
 
             # Spliceless
             total_f1_spliceless += accelerator.gather(f1_sl.repeat(args.train_batch_size)).mean().item()
@@ -661,7 +665,7 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             total_fpr_spliced += accelerator.gather(fpr_sp.repeat(args.train_batch_size)).mean().item()
             
             # Perceptual
-            avg_lpips += accelerator.gather(lpips_loss.repeat(args.train_batch_size)).mean().item()
+            # avg_lpips += accelerator.gather(lpips_loss.repeat(args.train_batch_size)).mean().item()
             avg_psnr += accelerator.gather(psnr.repeat(args.train_batch_size)).mean().item()
 
         break # execute only one batch
@@ -682,9 +686,8 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             total_acc_spliced / (step + 1),
             total_fpr_spliced / (step + 1)
         )
-        msg += "Perceptual - PSNR: {:.3f}, LPIPS: {:.3f} \n".format(
+        msg += "Perceptual - PSNR: {:.3f} \n".format(
             avg_psnr,
-            avg_lpips / (step + 1)
         )
         # msg += "Bit Correct - Spliceless: {:.3f}, Spliced: {:.3f} \n".format(
         #     avg_bit_correct_spliceless / (step + 1),
