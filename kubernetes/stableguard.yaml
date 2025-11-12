@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-freqloc-inpaint-latent-nograd
+  name: suhyeon-train-freqloc-inpaint-latent
 spec:
   template:
     spec:

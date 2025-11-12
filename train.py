@@ -306,6 +306,14 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
     set_seed(args.seed)
 
     noise_generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+    torch.autograd.set_detect_anomaly(True)
+
+    # prepare for inpainting simulation
+    T = 20
+    k = 3
+
+    inpaint_pipe.scheduler.set_timesteps(T, device=accelerator.device)
+    timesteps_list = inpaint_pipe.scheduler.timesteps
 
     for step, batch in enumerate(train_dataloader):
         lr = lr_scheduler.get_last_lr()[0]
@@ -344,46 +352,63 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 # timesteps_to_visualize = list(range(0, 1000, 100)) + [999]
                 # all_noisy_images = []
                 # for t_val in tqdm(timesteps_to_visualize):
-            with torch.no_grad():
-                orig_dtype = cover_images.dtype
-                pipe_dtype = inpaint_pipe.unet.dtype
 
-                cover_latents = original_vae.encode(cover_images).latent_dist.sample().to(dtype=pipe_dtype)
-                down_masks = F.interpolate(random_masks, size=(cover_latents.shape[2], cover_latents.shape[3]), mode="nearest")
-                down_masks = (down_masks > 0.5).to(dtype=pipe_dtype)
+            # prepare context with spliced latents
 
-                spliced_latents = down_masks * latents + (1 - down_masks) * cover_latents
-                prompt_embeds = inpaint_pipe._encode_prompt([""], accelerator.device, 1, True, None).to(dtype=pipe_dtype)
-                prompt_embeds = torch.cat([prompt_embeds[0].expand(images.size(0), -1, -1),
-                                                    prompt_embeds[1].expand(images.size(0), -1, -1)], dim=0)
-                inpaint_pipe.scheduler.set_timesteps(args.num_inference_steps_train, device=accelerator.device)
+            # spliced_image = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+            # spliced_latents = original_vae.encode(spliced_image).latent_dist.sample().to(dtype=weight_dtype)
 
-                timesteps = torch.randint(low=200, high=600, size=(images.size(0),), device=accelerator.device)
-                # timesteps = torch.tensor([t_val] * images.size(0), device=accelerator.device)
-                epsilon = torch.randn(cover_latents.shape, generator=noise_generator, device=accelerator.device, dtype=pipe_dtype)
-                noisy_latents = inpaint_pipe.scheduler.add_noise(cover_latents, epsilon, timesteps)
+            orig_dtype = cover_images.dtype
+            pipe_dtype = inpaint_pipe.unet.dtype
 
-                latent_model_input = torch.cat([noisy_latents] * 2)
-                latent_model_input = inpaint_pipe.scheduler.scale_model_input(latent_model_input, timesteps)
+            # cover_images = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
+            cover_latents = original_vae.encode(cover_images).latent_dist.sample().to(dtype=pipe_dtype)
+            cover_latents = cover_latents * original_vae.config.scaling_factor
 
-                unet_mask = torch.cat([down_masks] * 2)
-                unet_context = torch.cat([spliced_latents] * 2)
+            down_masks = F.interpolate(random_masks, size=(cover_latents.shape[2], cover_latents.shape[3]), mode="nearest")
+            down_masks = (down_masks > 0.5).to(dtype=pipe_dtype)
+
+            prompt_embeds = inpaint_pipe._encode_prompt([""], accelerator.device, 1, True, None)
+            prompt_embeds = torch.cat([prompt_embeds[0].expand(images.size(0), -1, -1),
+                                       prompt_embeds[1].expand(images.size(0), -1, -1)], dim=0)
+            prompt_embeds = prompt_embeds.to(dtype=pipe_dtype)
+
+            # spliced_latents = down_masks * latents + (1 - down_masks) * cover_latents
+
+            # twice for cfg
+            unet_mask = torch.cat([down_masks] * 2)
+            unet_context = torch.cat([(cover_latents*(1 - down_masks))] * 2)
+
+            noise = torch.randn(cover_latents.shape, generator=noise_generator, device=accelerator.device, dtype=pipe_dtype)
+            noise = noise * inpaint_pipe.scheduler.init_noise_sigma
+            current_latent = noise
+            # max_t = inpaint_pipe.scheduler.config.num_train_timesteps - 1
+            # max_t = torch.tensor(max_t, device=accelerator.device, dtype=torch.long)
+            # current_latent = inpaint_pipe.scheduler.add_noise(cover_latents, noise, max_t)
+            # current_latent = cover_latents
+
+            for i, t in enumerate(timesteps_list):
+                latent_model_input = torch.cat([current_latent] * 2)
+                latent_model_input = inpaint_pipe.scheduler.scale_model_input(latent_model_input, t)
                 latent_model_input = torch.cat([latent_model_input, unet_mask, unet_context], dim=1).to(dtype=pipe_dtype)
+
+                # t_batch = torch.tensor([t] * images.size(0), device=accelerator.device)
+                # t_batch_unet = torch.cat([t_batch] * 2)
+
+                if i < T - k:
+                    with torch.no_grad():
+                        noise_pred = inpaint_pipe.unet(latent_model_input, t, encoder_hidden_states=prompt_embeds, return_dict=False)[0]
+                else:
+                    noise_pred = inpaint_pipe.unet(latent_model_input, t, encoder_hidden_states=prompt_embeds, return_dict=False)[0]
                 
-                realistic_noise_pred = inpaint_pipe.unet(latent_model_input, torch.cat([timesteps] * 2), encoder_hidden_states=prompt_embeds, return_dict=False)[0]
-                
-                noise_pred_uncond, noise_pred_text = realistic_noise_pred.chunk(2)
-                realistic_noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_text - noise_pred_uncond)
+                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-                # DDIM Inversion
-                alpha_prod_t = inpaint_pipe.scheduler.alphas_cumprod[timesteps].to(device=noisy_latents.device, dtype=pipe_dtype)
-                alpha_prod_t = alpha_prod_t.view(-1, 1, 1, 1)
+                current_latent = inpaint_pipe.scheduler.step(noise_pred, t, current_latent, return_dict=False)[0]
 
-                sqrt_alpha_prod_t = alpha_prod_t ** 0.5
-                sqrt_one_minus_alpha_prod_t = (1 - alpha_prod_t) ** 0.5
-
-                attacked_latent = (noisy_latents - sqrt_one_minus_alpha_prod_t * realistic_noise_pred) / sqrt_alpha_prod_t
-                noisy_images = original_vae.decode(attacked_latent.to(dtype=orig_dtype), return_dict=False)[0]
+            attacked_latent = current_latent / original_vae.config.scaling_factor
+            noisy_images = original_vae.decode(attacked_latent.to(dtype=orig_dtype), return_dict=False)[0]
+            # noisy_images = F.interpolate(noisy_images, size=(args.resolution, args.resolution), mode="bilinear", align_corners=False)
             # all_noisy_images.append(noisy_images.to(dtype=orig_dtype))
 
             # if accelerator.is_main_process:
@@ -403,17 +428,17 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             #     )
 
             # random splicing
-            rand_num = random.random()
+            # rand_num = random.random()
             
             # tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
             # tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
 
-            if rand_num <= 0.5:
-                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
-                # tamper_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * cover_images # invert
-            elif rand_num > 0.5:
-                tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
-                # tamper_images = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
+            # if rand_num <= 0.5:
+            #     tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+            #     # tamper_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * cover_images # invert
+            # elif rand_num > 0.5:
+            #     tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
+            #     # tamper_images = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
 
             tamper_noisy_images = noisy_images
 
@@ -425,8 +450,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             #     # tamper_noisy_images = (1 - random_masks) * images.detach().clone() + random_masks * noisy_images # invert
 
             # add_quantization
-            tamper_images = round_pixel(tamper_images)
-            pred_mask = moe_gfn(tamper_images.to(dtype=weight_dtype))
+            # tamper_images = round_pixel(tamper_images)
+            # pred_mask = moe_gfn(tamper_images.to(dtype=weight_dtype))
 
             tamper_noisy_images = round_pixel(tamper_noisy_images)
             pred_noisy_mask = moe_gfn(tamper_noisy_images.to(dtype=weight_dtype))
@@ -442,8 +467,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # noisy_msg_loss = F.binary_cross_entropy_with_logits(pred_noisy_msgs, gt_msgs)
 
             # tamper loss
-            mask_loss = 0.2 * weighted_binary_cross_entropy(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone()) + \
-                        0.8 * dice_loss(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone())
+            # mask_loss = 0.2 * weighted_binary_cross_entropy(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone()) + \
+            #             0.8 * dice_loss(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone())
 
             noisy_mask_loss = 0.2 * weighted_binary_cross_entropy(pred_noisy_mask, F.interpolate(random_masks, (pred_noisy_mask.size(2), pred_noisy_mask.size(3))).detach().clone()) + \
                         0.8 * dice_loss(pred_noisy_mask, F.interpolate(random_masks, (pred_noisy_mask.size(2), pred_noisy_mask.size(3))).detach().clone())
@@ -454,7 +479,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             #     loss = mae_loss + lpips_loss + mask_loss
             # else:
             #     loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss
-            loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss #+ msg_loss + noisy_msg_loss
+            # loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss #+ msg_loss + noisy_msg_loss
+            loss = mae_loss + lpips_loss + noisy_mask_loss #+ msg_loss + noisy_msg_loss
 
             # for bit acc
             # pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
@@ -465,7 +491,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean().item()
             # avg_msg_loss = accelerator.gather(msg_loss.repeat(args.train_batch_size)).mean().item()
             # avg_noisy_msg_loss = accelerator.gather(noisy_msg_loss.repeat(args.train_batch_size)).mean().item()
-            avg_mask_loss = accelerator.gather(mask_loss.repeat(args.train_batch_size)).mean().item()
+            # avg_mask_loss = accelerator.gather(mask_loss.repeat(args.train_batch_size)).mean().item()
             avg_noisy_mask_loss = accelerator.gather(noisy_mask_loss.repeat(args.train_batch_size)).mean().item()
             avg_mae_loss = accelerator.gather(mae_loss.repeat(args.train_batch_size)).mean().item()
             avg_lpips_loss = accelerator.gather(lpips_loss.repeat(args.train_batch_size)).mean().item()
@@ -488,7 +514,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 writer.add_scalar("Loss/total_loss", avg_loss, global_step)
                 # writer.add_scalar("Loss/msg_loss", avg_msg_loss, global_step)
                 # writer.add_scalar("Loss/noisy_msg_loss", avg_noisy_msg_loss, global_step)
-                writer.add_scalar("Loss/mask_loss", avg_mask_loss, global_step)
+                # writer.add_scalar("Loss/mask_loss", avg_mask_loss, global_step)
                 writer.add_scalar("Loss/noisy_mask_loss", avg_noisy_mask_loss, global_step)
                 writer.add_scalar("Loss/lpips_loss", avg_lpips_loss, global_step)
                 writer.add_scalar("Loss/mse_loss", avg_mae_loss, global_step)
@@ -503,7 +529,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                         f"{'Step Loss:'}{avg_loss:6.3f} | "
                         # f"{'Msg Loss:'}{avg_msg_loss:6.3f} | "
                         # f"{'Noisy Msg Loss:'}{avg_noisy_msg_loss:6.3f} | "
-                        f"{'Mask Loss:'}{avg_mask_loss:6.3f} | "
+                        # f"{'Mask Loss:'}{avg_mask_loss:6.3f} | "
                         f"{'Noisy Mask Loss:'}{avg_noisy_mask_loss:6.3f} | "
                         f"{'LPIPS Loss:'}{avg_lpips_loss:6.3f} | "
                         f"{'MAE Loss:'}{avg_mae_loss:6.3f} | "
@@ -517,9 +543,9 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                                                cover_images[:args.train_batch_size], 
                                                ((cover_images - images) *10)[:args.train_batch_size],
                                                random_masks.repeat(1, 3, 1, 1)[:args.train_batch_size], 
-                                               tamper_images[:args.train_batch_size],
+                                            #    tamper_images[:args.train_batch_size],
                                                tamper_noisy_images[:args.train_batch_size],
-                                               F.sigmoid(F.interpolate(pred_mask, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size],
+                                            #    F.sigmoid(F.interpolate(pred_mask, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size],
                                                F.sigmoid(F.interpolate(pred_noisy_mask, (args.resolution, args.resolution))).repeat(1, 3, 1, 1)[:args.train_batch_size]],
                                                dim=0).detach().clone()
                     save_image(result_images, os.path.join(args.output_dir, 'images/train', '%s_%s.jpg' % (epoch, step)), normalize=True, scale_each=True, nrow=args.train_batch_size)
