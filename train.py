@@ -458,7 +458,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
             # Loss
             # similarity loss
-            lpips_loss = lpips(cover_images, images.float().detach().clone()).mean() # 0.1
+            # lpips_loss = lpips(cover_images, images.float().detach().clone()).mean() # 0.1
+            lpips_loss = 0.0
             mae_loss = F.l1_loss(cover_images, images.float().detach().clone()) # 0.1
 
             # watermark loss
@@ -480,7 +481,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # else:
             #     loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss
             # loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss #+ msg_loss + noisy_msg_loss
-            loss = mae_loss + lpips_loss + noisy_mask_loss #+ msg_loss + noisy_msg_loss
+            loss = mae_loss + noisy_mask_loss #+ msg_loss + noisy_msg_loss
 
             # for bit acc
             # pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
@@ -634,7 +635,8 @@ def val(args, epoch, accelerator, val_dataloader, weight_dtype, mpw_vae_decoder,
             acc_sp = acc_metric.batch_update(predict=mask_spliced, mask=gt_mask)
             fpr_sp = f1_metric.Cal_FPR(predict=mask_spliced, mask=gt_mask)
 
-            lpips_loss = lpips(cover_images, images.float().detach().clone()).mean()
+            # lpips_loss = lpips(cover_images, images.float().detach().clone()).mean()
+            lpips_loss = 0.0
             psnr = 10 * torch.log10(1 / F.mse_loss(cover_images, images.float().detach().clone()))
 
             # avg_bit_correct_spliceless += accelerator.gather((msgs_spliceless_bin.eq(msgs_bin.data[:, :, None, None]).float().mean()) / (args.train_batch_size * args.num_bits)).mean().item()
