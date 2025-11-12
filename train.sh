@@ -8,7 +8,7 @@
   --dataloader_num_workers=4 \
   --learning_rate=1e-4 \
   --weight_decay=1e-2 \
-  --output_dir="/mnt/nas5/suhyeon/projects/freqloc-ldm/exp26-baseline-train-inpaint-latent" \
+  --output_dir="/mnt/nas5/suhyeon/projects/freqloc-ldm/exp26-baseline-train-inpaint-latent-512" \
   --cache_dir="/mnt/nas5/suhyeon/caches" \
   --save_steps=1000 \
   --num_train_epochs=10 \
