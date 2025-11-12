@@ -253,6 +253,7 @@ def main():
     inpaint_pipe.unet.gradient_checkpointing = True
     mpw_vae_decoder.gradient_checkpointing = True
     moe_gfn.gradient_checkpointing = True
+    original_vae.gradient_checkpointing = True
 
     cast_training_params([mpw_vae_decoder])
 
