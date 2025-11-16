@@ -206,7 +206,7 @@ def main():
             filename=os.path.join(args.output_dir, 'log.log'))
 
     # Load scheduler, tokenizer and models.
-    original_vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae")
+    original_vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", cache_dir=args.cache_dir)
     mpw_vae_decoder = MultiplexingWatermarkVAEDecoder(num_bits=args.num_bits)
     moe_gfn = MoEGuidedForensicNet()
     # lpips = LPIPS(net="vgg") # WatsonDistanceVgg() both Perceptual loss is ok, WatsonDistanceVgg can get better image quality
