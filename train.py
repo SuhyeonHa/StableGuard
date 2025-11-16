@@ -370,7 +370,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             orig_dtype = cover_images.dtype
             pipe_dtype = inpaint_pipe.unet.dtype
 
-            cover_images = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
+            # cover_images = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
             cover_latents = original_vae.encode(cover_images).latent_dist.sample().to(dtype=pipe_dtype)
             cover_latents = cover_latents * original_vae.config.scaling_factor
 
@@ -437,17 +437,17 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             #     )
 
             # random splicing
-            # rand_num = random.random()
+            rand_num = random.random()
             
             # tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
             # tamper_noisy_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * noisy_images
 
-            # if rand_num <= 0.5:
-            #     tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
-            #     # tamper_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * cover_images # invert
-            # elif rand_num > 0.5:
-            #     tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
-            #     # tamper_images = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
+            if rand_num <= 0.5:
+                tamper_images = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
+                # tamper_images = (1 - random_masks) * decode_images.detach().clone() + random_masks * cover_images # invert
+            elif rand_num > 0.5:
+                tamper_images = random_masks * images.detach().clone() + (1 - random_masks) * cover_images
+                # tamper_images = (1 - random_masks) * images.detach().clone() + random_masks * cover_images # invert
 
             tamper_noisy_images = noisy_images
 
@@ -459,8 +459,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             #     # tamper_noisy_images = (1 - random_masks) * images.detach().clone() + random_masks * noisy_images # invert
 
             # add_quantization
-            # tamper_images = round_pixel(tamper_images)
-            # pred_mask = moe_gfn(tamper_images.to(dtype=weight_dtype))
+            tamper_images = round_pixel(tamper_images)
+            pred_mask = moe_gfn(tamper_images.to(dtype=weight_dtype))
 
             tamper_noisy_images = round_pixel(tamper_noisy_images)
             pred_noisy_mask = moe_gfn(tamper_noisy_images.to(dtype=weight_dtype))
@@ -477,8 +477,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # noisy_msg_loss = F.binary_cross_entropy_with_logits(pred_noisy_msgs, gt_msgs)
 
             # tamper loss
-            # mask_loss = 0.2 * weighted_binary_cross_entropy(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone()) + \
-            #             0.8 * dice_loss(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone())
+            mask_loss = 0.2 * weighted_binary_cross_entropy(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone()) + \
+                        0.8 * dice_loss(pred_mask, F.interpolate(random_masks, (pred_mask.size(2), pred_mask.size(3))).detach().clone())
 
             noisy_mask_loss = 0.2 * weighted_binary_cross_entropy(pred_noisy_mask, F.interpolate(random_masks, (pred_noisy_mask.size(2), pred_noisy_mask.size(3))).detach().clone()) + \
                         0.8 * dice_loss(pred_noisy_mask, F.interpolate(random_masks, (pred_noisy_mask.size(2), pred_noisy_mask.size(3))).detach().clone())
@@ -489,8 +489,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             #     loss = mae_loss + lpips_loss + mask_loss
             # else:
             #     loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss
-            # loss = mae_loss + lpips_loss + mask_loss + noisy_mask_loss #+ msg_loss + noisy_msg_loss
-            loss = mae_loss + noisy_mask_loss #+ msg_loss + noisy_msg_loss
+            loss = mae_loss + mask_loss + noisy_mask_loss #+ msg_loss + noisy_msg_loss
+            # loss = mae_loss + noisy_mask_loss #+ msg_loss + noisy_msg_loss
 
             # for bit acc
             # pred_msgs_bin = torch.round(torch.sigmoid(pred_msgs))
@@ -501,7 +501,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean().item()
             # avg_msg_loss = accelerator.gather(msg_loss.repeat(args.train_batch_size)).mean().item()
             # avg_noisy_msg_loss = accelerator.gather(noisy_msg_loss.repeat(args.train_batch_size)).mean().item()
-            # avg_mask_loss = accelerator.gather(mask_loss.repeat(args.train_batch_size)).mean().item()
+            avg_mask_loss = accelerator.gather(mask_loss.repeat(args.train_batch_size)).mean().item()
             avg_noisy_mask_loss = accelerator.gather(noisy_mask_loss.repeat(args.train_batch_size)).mean().item()
             avg_mae_loss = accelerator.gather(mae_loss.repeat(args.train_batch_size)).mean().item()
             # avg_lpips_loss = accelerator.gather(lpips_loss.repeat(args.train_batch_size)).mean().item()
@@ -524,7 +524,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 writer.add_scalar("Loss/total_loss", avg_loss, global_step)
                 # writer.add_scalar("Loss/msg_loss", avg_msg_loss, global_step)
                 # writer.add_scalar("Loss/noisy_msg_loss", avg_noisy_msg_loss, global_step)
-                # writer.add_scalar("Loss/mask_loss", avg_mask_loss, global_step)
+                writer.add_scalar("Loss/mask_loss", avg_mask_loss, global_step)
                 writer.add_scalar("Loss/noisy_mask_loss", avg_noisy_mask_loss, global_step)
                 # writer.add_scalar("Loss/lpips_loss", avg_lpips_loss, global_step)
                 writer.add_scalar("Loss/mse_loss", avg_mae_loss, global_step)
@@ -539,7 +539,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                         f"{'Step Loss:'}{avg_loss:6.3f} | "
                         # f"{'Msg Loss:'}{avg_msg_loss:6.3f} | "
                         # f"{'Noisy Msg Loss:'}{avg_noisy_msg_loss:6.3f} | "
-                        # f"{'Mask Loss:'}{avg_mask_loss:6.3f} | "
+                        f"{'Mask Loss:'}{avg_mask_loss:6.3f} | "
                         f"{'Noisy Mask Loss:'}{avg_noisy_mask_loss:6.3f} | "
                         # f"{'LPIPS Loss:'}{avg_lpips_loss:6.3f} | "
                         f"{'MAE Loss:'}{avg_mae_loss:6.3f} | "

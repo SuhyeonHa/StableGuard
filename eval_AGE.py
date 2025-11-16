@@ -268,7 +268,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         os.makedirs(os.path.join(save_path, '%s' % n), exist_ok=True)
 
     # load pretrained diffusion VAE (encoder/decoder)
-    original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suheyon/caches/')
+    original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suhyeon/caches/')
     pipe = StableDiffusionInpaintPipeline.from_pretrained(edit_model_name, cache_dir='/mnt/nas5/suhyeon/caches/')
     generator = torch.Generator().manual_seed(42)
     pipe = pipe.to("cuda")
