@@ -5,7 +5,7 @@
   --mask_pool_path="/mnt/nas5/suhyeon/datasets/coco-tamper-stableguard/datasets/mask_pool" \
   --resolution=256 \
   --train_batch_size=2 \
-  --dataloader_num_workers=4 \
+  --dataloader_num_workers=16 \
   --learning_rate=1e-4 \
   --weight_decay=1e-2 \
   --output_dir="/mnt/nas5/suhyeon/projects/freqloc-ldm/exp26-baseline-train-inpaint-latent-both" \
