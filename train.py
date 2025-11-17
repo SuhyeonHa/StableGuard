@@ -243,8 +243,6 @@ def main():
         cache_dir=args.cache_dir,
     ).to(accelerator.device)
 
-    inpaint_pipe.vae = None
-
     original_vae = original_vae.to(accelerator.device, dtype=weight_dtype)
     # lpips = lpips.to(accelerator.device)
     mpw_vae_decoder = mpw_vae_decoder.to(accelerator.device, dtype=weight_dtype)
@@ -367,58 +365,62 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
             # spliced_image = random_masks * decode_images.detach().clone() + (1 - random_masks) * cover_images
             # spliced_latents = original_vae.encode(spliced_image).latent_dist.sample().to(dtype=weight_dtype)
             
-            with torch.no_grad():
-                orig_dtype = cover_images.dtype
-                pipe_dtype = inpaint_pipe.unet.dtype
+            # with torch.no_grad():
+            orig_dtype = cover_images.dtype
+            pipe_dtype = inpaint_pipe.unet.dtype
 
-                cover_images_input = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
-                cover_latents = original_vae.encode(cover_images_input).latent_dist.sample().to(dtype=pipe_dtype)
-                cover_latents = cover_latents * original_vae.config.scaling_factor
+            cover_latents = inpaint_pipe.vae.encode(cover_images.to(dtype=pipe_dtype)).latent_dist.sample().to(dtype=pipe_dtype)
+            cover_latents = cover_latents * inpaint_pipe.vae.config.scaling_factor
 
-                down_masks = F.interpolate(random_masks, size=(cover_latents.shape[2], cover_latents.shape[3]), mode="nearest")
-                down_masks = (down_masks > 0.5).to(dtype=pipe_dtype)
+            masked_latents = inpaint_pipe.vae.encode((cover_images*(1-random_masks)).to(dtype=pipe_dtype)).latent_dist.sample().to(dtype=pipe_dtype)
+            masked_latents = masked_latents * inpaint_pipe.vae.config.scaling_factor
 
-                prompt_embeds = inpaint_pipe._encode_prompt([""], accelerator.device, 1, True, None)
-                prompt_embeds = torch.cat([prompt_embeds[0].expand(images.size(0), -1, -1),
-                                        prompt_embeds[1].expand(images.size(0), -1, -1)], dim=0)
-                prompt_embeds = prompt_embeds.to(dtype=pipe_dtype)
+            down_masks = F.interpolate(random_masks, size=(cover_latents.shape[2], cover_latents.shape[3]), mode="nearest")
+            down_masks = (down_masks > 0.5).to(dtype=pipe_dtype)
 
-                # spliced_latents = down_masks * latents + (1 - down_masks) * cover_latents
+            prompt_embeds = inpaint_pipe._encode_prompt([""], accelerator.device, 1, True, None)
+            prompt_embeds = torch.cat([prompt_embeds[0].expand(images.size(0), -1, -1),
+                                    prompt_embeds[1].expand(images.size(0), -1, -1)], dim=0)
+            prompt_embeds = prompt_embeds.to(dtype=pipe_dtype)
 
-                # twice for cfg
-                unet_mask = torch.cat([down_masks] * 2)
-                unet_context = torch.cat([(cover_latents*(1 - down_masks))] * 2)
+            # spliced_latents = down_masks * latents + (1 - down_masks) * cover_latents
 
-                noise = torch.randn(cover_latents.shape, generator=noise_generator, device=accelerator.device, dtype=pipe_dtype)
-                noise = noise * inpaint_pipe.scheduler.init_noise_sigma
-                current_latent = noise
-                # max_t = inpaint_pipe.scheduler.config.num_train_timesteps - 1
-                # max_t = torch.tensor(max_t, device=accelerator.device, dtype=torch.long)
-                # current_latent = inpaint_pipe.scheduler.add_noise(cover_latents, noise, max_t)
-                # current_latent = cover_latents
+            # twice for cfg
+            unet_mask = torch.cat([down_masks] * 2)
+            # unet_context = torch.cat([(cover_latents*(1 - down_masks))] * 2)
+            unet_context = torch.cat([masked_latents] * 2)
 
-                for i, t in enumerate(timesteps_list):
-                    latent_model_input = torch.cat([current_latent] * 2)
-                    latent_model_input = inpaint_pipe.scheduler.scale_model_input(latent_model_input, t)
-                    latent_model_input = torch.cat([latent_model_input, unet_mask, unet_context], dim=1).to(dtype=pipe_dtype)
+            noise = torch.randn(cover_latents.shape, generator=noise_generator, device=accelerator.device, dtype=pipe_dtype)
+            noise = noise * inpaint_pipe.scheduler.init_noise_sigma
+            current_latent = noise
+            # max_t = inpaint_pipe.scheduler.config.num_train_timesteps - 1
+            # max_t = torch.tensor(max_t, device=accelerator.device, dtype=torch.long)
+            # current_latent = inpaint_pipe.scheduler.add_noise(cover_latents, noise, max_t)
+            # current_latent = cover_latents
 
-                    # t_batch = torch.tensor([t] * images.size(0), device=accelerator.device)
-                    # t_batch_unet = torch.cat([t_batch] * 2)
+            for i, t in enumerate(timesteps_list):
+                latent_model_input = torch.cat([current_latent] * 2)
+                latent_model_input = inpaint_pipe.scheduler.scale_model_input(latent_model_input, t)
+                latent_model_input = torch.cat([latent_model_input, unet_mask, unet_context], dim=1).to(dtype=pipe_dtype)
 
-                    # if i < T - k:
-                    #     with torch.no_grad():
-                    #         noise_pred = inpaint_pipe.unet(latent_model_input, t, encoder_hidden_states=prompt_embeds, return_dict=False)[0]
-                    # else:
+                # t_batch = torch.tensor([t] * images.size(0), device=accelerator.device)
+                # t_batch_unet = torch.cat([t_batch] * 2)
+
+                if i < T - k:
+                    with torch.no_grad():
+                        noise_pred = inpaint_pipe.unet(latent_model_input, t, encoder_hidden_states=prompt_embeds, return_dict=False)[0]
+                else:
                     noise_pred = inpaint_pipe.unet(latent_model_input, t, encoder_hidden_states=prompt_embeds, return_dict=False)[0]
-                    
-                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_text - noise_pred_uncond)
+                
+                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-                    current_latent = inpaint_pipe.scheduler.step(noise_pred, t, current_latent, return_dict=False)[0]
+                current_latent = inpaint_pipe.scheduler.step(noise_pred, t, current_latent, return_dict=False)[0]
 
-                attacked_latent = current_latent / original_vae.config.scaling_factor
-                noisy_images = original_vae.decode(attacked_latent.to(dtype=orig_dtype), return_dict=False)[0]
-                noisy_images = F.interpolate(noisy_images, size=(args.resolution, args.resolution), mode="bilinear", align_corners=False)
+            attacked_latent = current_latent / inpaint_pipe.vae.config.scaling_factor
+            noisy_images = inpaint_pipe.vae.decode(attacked_latent, return_dict=False)[0]
+            noisy_images = noisy_images.to(dtype=orig_dtype)
+                # noisy_images = F.interpolate(noisy_images.to(dtype=orig_dtype), size=(args.resolution, args.resolution), mode="bilinear", align_corners=False)
             # all_noisy_images.append(noisy_images.to(dtype=orig_dtype))
 
             # if accelerator.is_main_process:
