@@ -1,17 +1,17 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-freqloc-inpaint-latent-both-full
+  name: suhyeon-train-freqloc-full-nograd-spsl
 spec:
   template:
     spec:
       runtimeClassName: nvidia
       # Uncomment this node Selector if you want to use a specific GPU type
       nodeSelector:
-        nvidia.com/gpu.product: NVIDIA-GeForce-RTX-3090
+        nvidia.com/gpu.product: NVIDIA-GeForce-RTX-2080-Ti
       
       # Uncomment below if you want to use a specific node
-      nodeName: sgvr-gpu-017
+      nodeName: sgvr-gpu-009
 
       # Uncomment below if you want to use a GPU device with memory > 15000
       # affinity:
@@ -35,14 +35,14 @@ spec:
             cpu: 14 
             memory: "64Gi"
             # enter GPU count (e.g., 2)
-            nvidia.com/gpu: 4
+            nvidia.com/gpu: 2
             # enter docker storage size (removed after pod's lifetime)
             ephemeral-storage: 16G
           requests:
             cpu: 4
             memory: "8Gi"
             # enter GPU count (e.g., 2)
-            nvidia.com/gpu: 4
+            nvidia.com/gpu: 2
             # enter docker storage size (removed after pod's lifetime)
             ephemeral-storage: 16G
         command: ["/app/entrypoint.sh"]
