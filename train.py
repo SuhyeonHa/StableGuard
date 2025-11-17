@@ -371,8 +371,8 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
                 orig_dtype = cover_images.dtype
                 pipe_dtype = inpaint_pipe.unet.dtype
 
-                cover_images = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
-                cover_latents = original_vae.encode(cover_images).latent_dist.sample().to(dtype=pipe_dtype)
+                cover_images_input = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
+                cover_latents = original_vae.encode(cover_images_input).latent_dist.sample().to(dtype=pipe_dtype)
                 cover_latents = cover_latents * original_vae.config.scaling_factor
 
                 down_masks = F.interpolate(random_masks, size=(cover_latents.shape[2], cover_latents.shape[3]), mode="nearest")
