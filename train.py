@@ -317,7 +317,7 @@ def train_one_epoch(args, epoch, accelerator, train_dataloader, weight_dtype, mp
 
     # prepare for inpainting simulation
     T = 20
-    k = 10
+    k = 3
 
     inpaint_pipe.scheduler.set_timesteps(T, device=accelerator.device)
     timesteps_list = inpaint_pipe.scheduler.timesteps
