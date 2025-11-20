@@ -19,7 +19,7 @@ from piq import ssim, psnr, LPIPS
 from evaluation import PixelF1, PixelAUC, PixelIOU, PixelAccuracy
 from dataset import age_collate_fn, AGEDataset
 import random
-from models import MultiplexingWatermarkVAEDecoder, MoEGuidedForensicNet
+from stableguard.models import MultiplexingWatermarkVAEDecoder, MoEGuidedForensicNet
 import yaml
 import torch.nn.functional as F
 import albumentations as albu

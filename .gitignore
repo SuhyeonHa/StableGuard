@@ -1,4 +1,5 @@
 __pycache__
 results/
 run/
-weights/*
+stableguard/weights/*
+not_used/*

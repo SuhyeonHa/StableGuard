@@ -1,1 +1,0 @@
-borrow from https://github.com/facebookresearch/watermark-anything
