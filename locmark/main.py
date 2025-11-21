@@ -140,6 +140,7 @@ def run_locmark(args=None, save_dir=None):
         
         os.makedirs(os.path.join(save_dir, "cover_images"), exist_ok=True)
         os.makedirs(os.path.join(save_dir, "watermark"), exist_ok=True)
+        os.makedirs(os.path.join(save_dir, "prediction"), exist_ok=True)
         
         for i in range(args.num_test_images):
             original = test_images[i:i+1].to(args.device)
@@ -161,6 +162,7 @@ def run_locmark(args=None, save_dir=None):
 
             torchvision.utils.save_image(watermarked.cpu(), os.path.join(save_dir, "cover_images", filename))
             torchvision.utils.save_image(watermark.cpu()*5, os.path.join(save_dir, "watermark", filename))
+            torchvision.utils.save_image(prediction.cpu(), os.path.join(save_dir, "prediction", filename))
 
             psnr = locmark._compute_psnr(original, watermarked)
             results[filename] = psnr
