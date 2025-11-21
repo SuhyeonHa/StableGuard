@@ -13,6 +13,16 @@
             "env": {
                 "CUDA_VISIBLE_DEVICES": "3"
             }
+        },
+        {
+            "name": "Single image optimization",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "locmark/main.py",
+            "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "2"
+            },
         }
     ]
 }

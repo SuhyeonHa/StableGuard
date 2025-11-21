@@ -48,6 +48,10 @@ def load_image(path: str, transform=None) -> torch.Tensor:
     image = Image.open(path).convert("RGB")
     return transform(image).unsqueeze(0)
 
+def load_mask(path: str, transform=None) -> torch.Tensor:
+    mask = Image.open(path).convert("L")
+    return transform(mask).unsqueeze(0)
+
 # Logging
 
 class Tee:
@@ -73,7 +77,7 @@ def save_images(results, filename, save_dir):
         os.makedirs(output_dir, exist_ok=True)
         save_path = os.path.join(output_dir, f"{filename}")
         if name == "watermark":
-            img = img*10
+            img = img*5
         torchvision.utils.save_image(img, save_path)
 
     # Save all images at once

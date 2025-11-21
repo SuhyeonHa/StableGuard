@@ -27,11 +27,12 @@ class Params:
         # --- System & Paths ---
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
-        self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0088.png'
+        self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0003.png'
         self.exp_name = 'baseline'
-        # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # signle image optimization
-        self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours' # multi image optimization
-        self.single_image_mode = False
+        # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
+        self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours' # NOTE: multi image optimization
+        # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
+        self.single_image_mode = False # NOTE
         self.num_test_images = 100 # the first n images
 
         # --- Model Configurations ---
@@ -59,8 +60,8 @@ class Params:
         # --- Optimization Parameters ---
         self.lr = 2.0
         self.steps = 300
-        self.lambda_p = 0.05 #0.025
-        self.lambda_i = 0.01 #0.005
+        self.lambda_p = 0.1 #0.05 #0.025
+        self.lambda_i = 0.05 #0.01 #0.005
         self.feat_layer = 1
 
         # --- Robustness Parameters --- 
@@ -108,7 +109,7 @@ def run_locmark(args=None, save_dir=None):
 
         for i in tqdm(range(args.num_test_images), desc="Embedding Watermarks"):
             original = test_images[i:i+1].to(args.device)
-            filename = '0088.png'
+            filename = '0003.png'
 
             # Embed watermarks
             print("Embedding watermarks for:", filename)
@@ -159,7 +160,7 @@ def run_locmark(args=None, save_dir=None):
             prediction = locmark.decode_watermark(watermarked)
 
             torchvision.utils.save_image(watermarked.cpu(), os.path.join(save_dir, "cover_images", filename))
-            torchvision.utils.save_image(watermark.cpu(), os.path.join(save_dir, "watermark", filename))
+            torchvision.utils.save_image(watermark.cpu()*5, os.path.join(save_dir, "watermark", filename))
 
             psnr = locmark._compute_psnr(original, watermarked)
             results[filename] = psnr

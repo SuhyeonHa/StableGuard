@@ -195,26 +195,44 @@ class LocMark:
 
             epsilon = 1e-6
 
+            features = self.image_encoder(image)[self.args.feat_layer]
+            B, C, H, W = features.shape
+            features = features.permute(0, 2, 3, 1).view(B, H * W, C)
+            features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
+            base_cos_sim = torch.matmul(features_norm, self.direction_vectors.T)
+            if step%100 ==0:
+                print("Base Cosine Similarity - Min: {}, Max: {}, Mean: {}".format(
+                    torch.min(base_cos_sim), torch.max(base_cos_sim), torch.mean(base_cos_sim)))
+
             features = self.image_encoder(watermarked_image)[self.args.feat_layer]
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
-            cosine_similarity = torch.matmul(features_norm, self.direction_vectors.T)
+            cos_sim = torch.matmul(features_norm, self.direction_vectors.T)
+            if step%100 ==0:
+                print("Cosine Similarity - Min: {}, Max: {}, Mean: {}".format(
+                    torch.min(cos_sim), torch.max(cos_sim), torch.mean(cos_sim)))
 
             features = self.image_encoder(watermarked_image_1)[self.args.feat_layer]
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
-            cosine_similarity_1 = torch.matmul(features_norm, self.direction_vectors.T)
+            cos_sim_1 = torch.matmul(features_norm, self.direction_vectors.T)
+            if step%100 ==0:
+                print("Cosine Similarity (Noisy) - Min: {}, Max: {}, Mean: {}".format(
+                    torch.min(cos_sim_1), torch.max(cos_sim_1), torch.mean(cos_sim_1)))
 
-            B = cosine_similarity.shape[0]
-            H = W = int(cosine_similarity.shape[1] ** 0.5)
+            B = cos_sim.shape[0]
+            H = W = int(cos_sim.shape[1] ** 0.5)
 
             target_cosine = 0.1 # 1.0 - 1.5
-            loss_m = torch.mean(F.relu(target_cosine - cosine_similarity))
-            loss_m1 = torch.mean(F.relu(target_cosine - cosine_similarity_1))
+            loss_m = torch.mean(F.relu(target_cosine - cos_sim))
+            loss_m1 = torch.mean(F.relu(target_cosine - cos_sim_1))
 
-            loss_f = self._dice_loss(cosine_similarity, mask)
-            loss_f1 = self._dice_loss(cosine_similarity_1, mask)
+            loss_h = self._hard_negative_mining_loss(cos_sim, target_cosine, k_percent=0.1)
+            loss_h1 = self._hard_negative_mining_loss(cos_sim_1, target_cosine, k_percent=0.1)
+
+            loss_f = self._dice_loss(cos_sim, mask)
+            loss_f1 = self._dice_loss(cos_sim_1, mask)
 
             watermarked_image = denorm_imagenet(watermarked_image)
             masked = denorm_imagenet(masked)
@@ -228,6 +246,7 @@ class LocMark:
             
             total_loss = clean_weight * (loss_m) + \
                          noisy_weight * (loss_m1) + \
+                         loss_h + loss_h1 + \
                          0.2 * loss_f + 0.2 * loss_f1 + \
                          self.args.lambda_p * loss_psnr + \
                          self.args.lambda_i * loss_lpips
@@ -238,8 +257,8 @@ class LocMark:
             if step == 0 or (step+1) % 100 == 0:
                 psnr_val = self._compute_psnr(watermarked_image.detach(), image.detach())
                 print(f"Step {step+1}, Loss: {total_loss.item():.4f}, PSNR: {psnr_val:.2f}")
-                print(f"Mask Loss: {loss_m.item():.4f}") #, DICE Loss: {loss_d.item():.4f}")
-                print(f"Mask1 Loss: {(loss_m1).item():.4f}") #, DICE1 Loss: {loss_d1.item():.4f}")
+                print(f"Mask loss: {loss_m.item():.4f}, Mask1 loss: {loss_m1.item():.4f}")
+                print(f"Hard Neg Loss: {loss_h.item():.4f}, Hard Neg1 Loss: {loss_h1.item():.4f}")
                 print(f"Focal Loss: {loss_f.item():.4f}, Focal1 Loss: {loss_f1.item():.4f}")
                 print(f"PSNR Loss: {loss_psnr.item():.4f}, LPIPS Loss: {loss_lpips.item():.4f}")
 
@@ -271,8 +290,7 @@ class LocMark:
 
             epsilon = 1e-6
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
-            direction_norm = self.direction_vectors / (torch.norm(self.direction_vectors, p=2, dim=-1, keepdim=True) + epsilon)
-            dot_products = torch.matmul(features_norm, direction_norm.T)
+            dot_products = torch.matmul(features_norm, self.direction_vectors.T)
 
             B = dot_products.shape[0]
             H = W = int(dot_products.shape[1] ** 0.5)
@@ -322,3 +340,18 @@ class LocMark:
         dice_coeff = (2. * intersection + smooth) / (pred.sum() + target.sum() + smooth)
         
         return 1 - dice_coeff
+    
+    def _hard_negative_mining_loss(self, scores, target_val, k_percent=0.1):
+        # scores: [Batch, Patches] 형태의 코사인 유사도
+        # target_val: 목표 코사인 유사도 (예: 0.25)
+        
+        pixel_losses = F.relu(target_val - scores)
+        
+        pixel_losses = pixel_losses.view(-1)
+        
+        num_hard = int(pixel_losses.numel() * k_percent)
+        if num_hard < 1: num_hard = 1
+        
+        top_k_loss, _ = torch.topk(pixel_losses, num_hard)
+
+        return top_k_loss.mean()
