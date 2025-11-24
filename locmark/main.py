@@ -15,8 +15,8 @@ from datetime import datetime
 import yaml
 import time
 import torchvision.transforms as transforms
-from helper import load_images_from_path, load_image, Tee, save_images
-from locmark import LocMark
+from .helper import load_images_from_path, load_image, Tee, save_images
+from .locmark import LocMark
 from tqdm import tqdm
 warnings.filterwarnings('ignore')
 
@@ -30,9 +30,9 @@ class Params:
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0003.png'
         self.exp_name = 'baseline'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
-        self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours' # NOTE: multi image optimization
-        # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
-        self.single_image_mode = False # NOTE
+        # self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours' # NOTE: multi image optimization
+        self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
+        self.single_image_mode = True # NOTE
         self.num_test_images = 100 # the first n images
 
         # --- Model Configurations ---
@@ -51,7 +51,7 @@ class Params:
         self.message_bits = 48
         self.margin = 1.0
         self.grid_size = 28
-        self.mask_percentage = 0.3
+        self.mask_percentage = 0.1
         self.num_masks = 1
         self.seed = 42
         self.num_inference_steps = 100

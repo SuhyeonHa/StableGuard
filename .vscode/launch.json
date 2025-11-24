@@ -18,11 +18,23 @@
             "name": "Single image optimization",
             "type": "debugpy",
             "request": "launch",
-            "program": "locmark/main.py",
+            "module": "locmark.main",       // running module
+            "cwd": "${workspaceFolder}",    // fixed working directory
             "console": "integratedTerminal",
             "env": {
                 "CUDA_VISIBLE_DEVICES": "2"
-            },
+            }
+        },
+                {
+            "name": "Eval AGE",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "eval_AGE",       // running module
+            "cwd": "${workspaceFolder}",    // fixed working directory
+            "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "2"
+            }
         }
     ]
 }

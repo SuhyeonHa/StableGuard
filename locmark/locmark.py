@@ -8,7 +8,7 @@ from tqdm import tqdm
 import torch.optim as optim
 import numpy as np
 import lpips
-from helper import load_images_from_path, norm_imagenet, denorm_imagenet
+from .helper import load_images_from_path, norm_imagenet, denorm_imagenet
 
 
 class LocMark:

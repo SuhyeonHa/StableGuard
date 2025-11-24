@@ -2,16 +2,19 @@ weight_paths:
   omniguard: "/mnt/nas5/suhyeon/checkpoints/omniguard/"
   wam: "/mnt/nas5/suhyeon/checkpoints/wam/"
   stableguard: "/mnt/nas5/suhyeon/checkpoints/stableguard/weights/clean"
+  ours: ""
 
-normalization:
+normalization: # related to their own embedder
   omniguard: "rescale"
   wam: "rescale" # TODO: try "imagenet"
   stableguard: "rescale"
+  ours: "rescale" # doesn't matter
 
 num_bits:
   omniguard: 64
   wam: 32
   stableguard: 48
+  ours: 0
 
 defaults:
   src_image_path: "/mnt/nas5/suhyeon/datasets/valAGE-Set"
