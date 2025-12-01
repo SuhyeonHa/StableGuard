@@ -196,7 +196,7 @@ class LocMark:
             epsilon = 1e-6
 
             features = self.image_encoder(image)[self.args.feat_layer]
-            B, C, H, W = features.shape
+            B, C, H, W = features.shape # [1, 192, 32, 32]
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
             base_cos_sim = torch.matmul(features_norm, self.direction_vectors.T)

@@ -6,7 +6,7 @@ weight_paths:
 
 normalization: # related to their own embedder
   omniguard: "rescale"
-  wam: "rescale" # TODO: try "imagenet"
+  wam: "imagenet" # TODO: try "imagenet"
   stableguard: "rescale"
   ours: "rescale" # doesn't matter
 
