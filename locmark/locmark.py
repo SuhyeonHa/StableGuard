@@ -10,6 +10,7 @@ import numpy as np
 import lpips
 from .helper import load_images_from_path, norm_imagenet, denorm_imagenet
 
+epsilon = 1e-6
 
 class LocMark:
     def __init__(self, args):
@@ -193,14 +194,13 @@ class LocMark:
             masked = norm_imagenet(masked)
             masked_1 = norm_imagenet(masked_1)
 
-            epsilon = 1e-6
-
             features = self.image_encoder(image)[self.args.feat_layer]
             B, C, H, W = features.shape # [1, 192, 32, 32]
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
             base_cos_sim = torch.matmul(features_norm, self.direction_vectors.T)
-            if step%100 ==0:
+
+            if step == 0 or (step+1) % 100 == 0:
                 print("Base Cosine Similarity - Min: {}, Max: {}, Mean: {}".format(
                     torch.min(base_cos_sim), torch.max(base_cos_sim), torch.mean(base_cos_sim)))
 
@@ -209,7 +209,7 @@ class LocMark:
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
             cos_sim = torch.matmul(features_norm, self.direction_vectors.T)
-            if step%100 ==0:
+            if step == 0 or (step+1) % 100 == 0:
                 print("Cosine Similarity - Min: {}, Max: {}, Mean: {}".format(
                     torch.min(cos_sim), torch.max(cos_sim), torch.mean(cos_sim)))
 
@@ -217,7 +217,7 @@ class LocMark:
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
             cos_sim_1 = torch.matmul(features_norm, self.direction_vectors.T)
-            if step%100 ==0:
+            if step == 0 or (step+1) % 100 == 0:
                 print("Cosine Similarity (Noisy) - Min: {}, Max: {}, Mean: {}".format(
                     torch.min(cos_sim_1), torch.max(cos_sim_1), torch.mean(cos_sim_1)))
 
@@ -296,11 +296,7 @@ class LocMark:
             H = W = int(dot_products.shape[1] ** 0.5)
             grid = dot_products.view(B, H, W).unsqueeze(0) # [1, 256, 1] -> [1, 1, 16, 16]
             grid = F.interpolate(grid, size=self.args.image_size, mode='bilinear', align_corners=False)
-
-            # threshold = 0.1
-            # binary_prediction = (grid >= threshold).float()
-            temperature = 5.0  # (5.0 ~ 10.0 사이의 값으로 실험 필요)
-            scaled_grid = grid * temperature
+            scaled_grid = grid * self.args.temperature
             confidence_map = torch.sigmoid(scaled_grid)
             binary_prediction = (confidence_map >= 0.5).float()
 
@@ -325,12 +321,11 @@ class LocMark:
         return 20 * np.log10(1.0 / np.sqrt(mse))
     
     def _dice_loss(self, cos_sim, gt_mask, smooth=1e-5):
-        temperature = 5
         B = cos_sim.shape[0]
         H = W = int(cos_sim.shape[1] ** 0.5)
         grid = cos_sim.view(B, H, W).unsqueeze(0)
         grid = F.interpolate(grid, size=self.args.image_size, mode='bilinear', align_corners=False) # [B, Num_Patches, Feature_Dim]*[B, Feature_Dim, 1] = [B, Num_Patches, 1]
-        pred = torch.sigmoid(grid * temperature) # Logits to probabilities
+        pred = torch.sigmoid(grid * self.args.temperature) # Logits to probabilities
        
         # Flatten label and prediction tensors
         pred = pred.view(-1)

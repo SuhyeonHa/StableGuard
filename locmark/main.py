@@ -48,7 +48,6 @@ class Params:
         ])
 
         # --- LocMark Core Parameters ---
-        self.message_bits = 48
         self.margin = 1.0
         self.grid_size = 28
         self.mask_percentage = 0.1
@@ -56,6 +55,8 @@ class Params:
         self.seed = 42
         self.num_inference_steps = 100
         self.guidance_scale = 7.5
+        self.temperature = 5.0
+        self.threshold = 0.5
 
         # --- Optimization Parameters ---
         self.lr = 2.0
