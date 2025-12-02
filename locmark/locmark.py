@@ -27,9 +27,12 @@ class LocMark:
             pretrained=True,
             features_only=True
         ).to(self.args.device)
+        # self.feature_upsampler = torch.hub.load('wimmerth/anyup', 'anyup_multi_backbone', use_natten=True).to(self.args.device)
 
         for param in self.image_encoder.parameters():
             param.requires_grad = False
+        # for param in self.feature_upsampler.parameters():
+        #     param.requires_grad = False
 
         self.pipe.vae.requires_grad_(False)
         self.pipe.unet.requires_grad_(False)
@@ -149,15 +152,15 @@ class LocMark:
         # for step in tqdm(range(self.args.steps), desc="Embedding Watermark"):
             optimizer.zero_grad()
 
-            mask = self._create_random_mask(image, num_masks=1, mask_percentage=self.args.mask_percentage)
-            mask = mask.to(self.args.device)
-            target_mask = mask * 2 - 1 # Convert to {-1, 1}
+            original_mask = self._create_random_mask(image, num_masks=1, mask_percentage=self.args.mask_percentage)
+            original_mask = original_mask.to(self.args.device)
+            target_mask = original_mask * 2 - 1 # Convert to {-1, 1}
 
             if random.random() < 0.5:
-                mask = 1 - mask
+                original_mask = 1 - original_mask
 
             image = F.interpolate(original, size=(self.args.vae_image_size, self.args.vae_image_size), mode="bilinear", align_corners=False)
-            mask = F.interpolate(mask, size=(self.args.vae_image_size, self.args.vae_image_size), mode="bilinear", align_corners=False)
+            mask = F.interpolate(original_mask, size=(self.args.vae_image_size, self.args.vae_image_size), mode="nearest")
             
             # perturbed_fft = latent_fft + delta_m
             # perturbed_latent = torch.fft.ifft2(perturbed_fft, dim=(-2, -1)).real
@@ -169,7 +172,7 @@ class LocMark:
             masked = watermarked_image * mask + (1 - mask) * image
 
             # uniform noise
-            latent_mask = F.interpolate(mask, size=(64, 64), mode="bilinear", align_corners=False)
+            latent_mask = F.interpolate(original_mask, size=(64, 64), mode="bilinear", align_corners=False)
             
             std_val_0 = random.uniform(self.args.eps0_std[0], self.args.eps0_std[1])
             eps0 = torch.randn_like(perturbed_latent) * std_val_0
@@ -182,7 +185,7 @@ class LocMark:
 
             # Compute losses
             image = F.interpolate(original, size=(img_size, img_size), mode="bilinear", align_corners=False)
-            mask = F.interpolate(mask, size=(img_size, img_size), mode="bilinear", align_corners=False)
+            mask = F.interpolate(original_mask, size=(img_size, img_size), mode="nearest")
             target_mask = F.interpolate(target_mask, size=(img_size, img_size), mode="bilinear", align_corners=False)
             masked = F.interpolate(masked, size=(img_size, img_size), mode="bilinear", align_corners=False)
             masked_1 = F.interpolate(masked_1, size=(img_size, img_size), mode="bilinear", align_corners=False)
@@ -190,11 +193,13 @@ class LocMark:
             watermarked_image = F.interpolate(watermarked_image, size=(img_size, img_size), mode="bilinear", align_corners=False)
             watermarked_image_1 = F.interpolate(watermarked_image_1, size=(img_size, img_size), mode="bilinear", align_corners=False)
             
+            image = norm_imagenet(image)
             watermarked_image = norm_imagenet(watermarked_image)
             masked = norm_imagenet(masked)
             masked_1 = norm_imagenet(masked_1)
 
             features = self.image_encoder(image)[self.args.feat_layer]
+            # features = self.feature_upsampler(image, features, q_chunk_size=3)
             B, C, H, W = features.shape # [1, 192, 32, 32]
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
@@ -203,8 +208,11 @@ class LocMark:
             if step == 0 or (step+1) % 100 == 0:
                 print("Base Cosine Similarity - Min: {}, Max: {}, Mean: {}".format(
                     torch.min(base_cos_sim), torch.max(base_cos_sim), torch.mean(base_cos_sim)))
+                
+            noise_floor = torch.max(base_cos_sim)
 
             features = self.image_encoder(watermarked_image)[self.args.feat_layer]
+            # features = self.feature_upsampler(watermarked_image, features, q_chunk_size=3)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
@@ -214,6 +222,7 @@ class LocMark:
                     torch.min(cos_sim), torch.max(cos_sim), torch.mean(cos_sim)))
 
             features = self.image_encoder(watermarked_image_1)[self.args.feat_layer]
+            # features = self.feature_upsampler(watermarked_image_1, features, q_chunk_size=3)
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
             cos_sim_1 = torch.matmul(features_norm, self.direction_vectors.T)
@@ -224,16 +233,22 @@ class LocMark:
             B = cos_sim.shape[0]
             H = W = int(cos_sim.shape[1] ** 0.5)
 
-            target_cosine = 0.1 # 1.0 - 1.5
+            target_cosine = noise_floor + 0.1 # 0.1-0.3
+
+            if step==0:
+                print(f"Noise Floor Cosine Similarity: {noise_floor.item():.4f}")
+                print(f"Target Cosine Similarity: {target_cosine.item():.4f}")
+            
             loss_m = torch.mean(F.relu(target_cosine - cos_sim))
             loss_m1 = torch.mean(F.relu(target_cosine - cos_sim_1))
 
             loss_h = self._hard_negative_mining_loss(cos_sim, target_cosine, k_percent=0.1)
             loss_h1 = self._hard_negative_mining_loss(cos_sim_1, target_cosine, k_percent=0.1)
 
-            loss_f = self._dice_loss(cos_sim, mask)
-            loss_f1 = self._dice_loss(cos_sim_1, mask)
+            # loss_d = self._dice_loss(cos_sim_masked, mask)
+            # loss_d1 = self._dice_loss(cos_sim_masked_1, mask)
 
+            image = denorm_imagenet(image)
             watermarked_image = denorm_imagenet(watermarked_image)
             masked = denorm_imagenet(masked)
             masked_1 = denorm_imagenet(masked_1)
@@ -247,9 +262,9 @@ class LocMark:
             total_loss = clean_weight * (loss_m) + \
                          noisy_weight * (loss_m1) + \
                          loss_h + loss_h1 + \
-                         0.2 * loss_f + 0.2 * loss_f1 + \
                          self.args.lambda_p * loss_psnr + \
                          self.args.lambda_i * loss_lpips
+                                    #  0.2 * loss_d + 0.2 * loss_d1 + \
             
             total_loss.backward()
             optimizer.step()
@@ -259,7 +274,7 @@ class LocMark:
                 print(f"Step {step+1}, Loss: {total_loss.item():.4f}, PSNR: {psnr_val:.2f}")
                 print(f"Mask loss: {loss_m.item():.4f}, Mask1 loss: {loss_m1.item():.4f}")
                 print(f"Hard Neg Loss: {loss_h.item():.4f}, Hard Neg1 Loss: {loss_h1.item():.4f}")
-                print(f"Focal Loss: {loss_f.item():.4f}, Focal1 Loss: {loss_f1.item():.4f}")
+                # print(f"Dice Loss: {loss_d.item():.4f}, Dice1 Loss: {loss_d1.item():.4f}")
                 print(f"PSNR Loss: {loss_psnr.item():.4f}, LPIPS Loss: {loss_lpips.item():.4f}")
 
         # Final watermarked image
@@ -284,6 +299,7 @@ class LocMark:
         with torch.no_grad():
             watermarked_image = norm_imagenet(watermarked_image) 
             features = self.image_encoder(watermarked_image)[self.args.feat_layer]
+            # features = self.feature_upsampler(watermarked_image, features, q_chunk_size=3)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             # dot_products = torch.matmul(features, self.direction_vectors.T) # [1, 256, 384]*[1, 384, 256] -> [1, 256, 1]
@@ -298,7 +314,7 @@ class LocMark:
             grid = F.interpolate(grid, size=self.args.image_size, mode='bilinear', align_corners=False)
             scaled_grid = grid * self.args.temperature
             confidence_map = torch.sigmoid(scaled_grid)
-            binary_prediction = (confidence_map >= 0.5).float()
+            binary_prediction = (confidence_map > 0.5).float()
 
         return binary_prediction
     
@@ -330,18 +346,14 @@ class LocMark:
         # Flatten label and prediction tensors
         pred = pred.view(-1)
         target = gt_mask.view(-1)
-        
+
         intersection = (pred * target).sum()
         dice_coeff = (2. * intersection + smooth) / (pred.sum() + target.sum() + smooth)
         
         return 1 - dice_coeff
     
-    def _hard_negative_mining_loss(self, scores, target_val, k_percent=0.1):
-        # scores: [Batch, Patches] 형태의 코사인 유사도
-        # target_val: 목표 코사인 유사도 (예: 0.25)
-        
+    def _hard_negative_mining_loss(self, scores, target_val, k_percent=0.1):        
         pixel_losses = F.relu(target_val - scores)
-        
         pixel_losses = pixel_losses.view(-1)
         
         num_hard = int(pixel_losses.numel() * k_percent)
