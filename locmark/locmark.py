@@ -147,6 +147,8 @@ class LocMark:
         # input = F.interpolate(original, size=(self.args.vae_image_size, self.args.vae_image_size), mode="bilinear", align_corners=False)
         # adaptive_weight = self._get_feature_weight(input, min_weight=0.3)
 
+        smoother = torch.nn.AvgPool2d(kernel_size=3, stride=1, padding=1)
+
         # Training loop
         for step in range(self.args.steps):
         # for step in tqdm(range(self.args.steps), desc="Embedding Watermark"):
@@ -233,12 +235,12 @@ class LocMark:
             B = cos_sim.shape[0]
             H = W = int(cos_sim.shape[1] ** 0.5)
 
-            target_cosine = noise_floor + 0.1 # 0.1-0.3
+            target_cosine = self.args.target_cossim + 0.1 # 0.1-0.3
 
             if step==0:
-                print(f"Noise Floor Cosine Similarity: {noise_floor.item():.4f}")
-                print(f"Target Cosine Similarity: {target_cosine.item():.4f}")
-            
+                print(f"Noise Floor Cosine Similarity: {noise_floor:.4f}")
+                print(f"Target Cosine Similarity: {target_cosine:.4f}")
+
             loss_m = torch.mean(F.relu(target_cosine - cos_sim))
             loss_m1 = torch.mean(F.relu(target_cosine - cos_sim_1))
 
@@ -295,10 +297,12 @@ class LocMark:
         
     def decode_watermark(self, watermarked_image: torch.Tensor) -> torch.Tensor:
         watermarked_image = watermarked_image.to(self.args.device)
+        smoother = torch.nn.AvgPool2d(kernel_size=3, stride=1, padding=1)
         
         with torch.no_grad():
             watermarked_image = norm_imagenet(watermarked_image) 
             features = self.image_encoder(watermarked_image)[self.args.feat_layer]
+            features = smoother(features)
             # features = self.feature_upsampler(watermarked_image, features, q_chunk_size=3)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
@@ -310,9 +314,9 @@ class LocMark:
 
             B = dot_products.shape[0]
             H = W = int(dot_products.shape[1] ** 0.5)
-            grid = dot_products.view(B, H, W).unsqueeze(0) # [1, 256, 1] -> [1, 1, 16, 16]
+            grid = dot_products.view(B, H, W).unsqueeze(0) # [1, 1024, 1] -> [1, 1, 32, 32]
             grid = F.interpolate(grid, size=self.args.image_size, mode='bilinear', align_corners=False)
-            scaled_grid = grid * self.args.temperature
+            scaled_grid = (grid-self.args.target_cossim) * self.args.temperature
             confidence_map = torch.sigmoid(scaled_grid)
             binary_prediction = (confidence_map > 0.5).float()
 

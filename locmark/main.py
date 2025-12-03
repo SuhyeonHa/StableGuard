@@ -27,12 +27,12 @@ class Params:
         # --- System & Paths ---
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
-        self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0018.png'
+        self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0022.png'
         self.exp_name = 'baseline'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
-        self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours' # NOTE: multi image optimization
-        # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
-        self.single_image_mode = False # NOTE
+        # self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours' # NOTE: multi image optimization
+        self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
+        self.single_image_mode = True # NOTE
         self.num_test_images = 100 # the first n images
 
         # --- Model Configurations ---
@@ -50,13 +50,13 @@ class Params:
         # --- LocMark Core Parameters ---
         self.margin = 1.0
         self.grid_size = 28
-        self.mask_percentage = 0.1
+        self.mask_percentage = 0.3
         self.num_masks = 1
         self.seed = 42
         self.num_inference_steps = 100
         self.guidance_scale = 7.5
         self.temperature = 5.0
-        self.threshold = 0.5
+        self.target_cossim = 0.1
 
         # --- Optimization Parameters ---
         self.lr = 2.0
@@ -110,7 +110,7 @@ def run_locmark(args=None, save_dir=None):
 
         for i in tqdm(range(args.num_test_images), desc="Embedding Watermarks"):
             original = test_images[i:i+1].to(args.device)
-            filename = '0018.png'
+            filename = '0022.png'
 
             # Embed watermarks
             print("Embedding watermarks for:", filename)

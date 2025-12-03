@@ -182,7 +182,7 @@ class Evaluation(object):
 
             # resize ground-truth to match predicted mask spatial size if needed
             # invert gt mask: watermarked regions are white (1)
-            gt_tensor = torch.nn.functional.interpolate(1-gt_tensor, (pred_tensor.size(2), pred_tensor.size(3)))
+            gt_tensor = torch.nn.functional.interpolate(gt_tensor, (pred_tensor.size(2), pred_tensor.size(3)))
 
             # call evaluator batch_update for each metric (these update internal state or return stat)
             f1 = self.f1.batch_update(predict=pred_tensor, mask=gt_tensor)
@@ -534,7 +534,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             spliceless_image_pil.save(os.path.join(save_path, 'spliceless_images', save_file_name.replace("jpg", "png")))
 
             # save ground-truth mask as image tensor and message vector as .pt file
-            save_image(mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+            save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
             # torch.save(msg, os.path.join(save_path, 'msgs', save_file_name.split(".")[0] + '.pt'))
 
     # After processing all batches, summarise the image-similarity metrics across the dataset
@@ -756,9 +756,9 @@ if __name__ == "__main__":
     # ------------------ Configuration ------------------
     run_config = {
         'src_image_path': "/mnt/nas5/suhyeon/datasets/valAGE-Set",
-        'target_model': "omniguard", # ["omniguard", "wam", "stableguard", "ours"]
-        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/256_valAGE_sd_1.2_wm_fix",
-        # 'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/ours/20251121-102409",
+        'target_model': "ours", # ["omniguard", "wam", "stableguard", "ours"] # NOTE
+        # 'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/256_valAGE_sd_1.2_wm_fix",
+        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/ours/20251202-134030", # NOTE
         'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
         'size': 256,
         'start_idx': 0,
@@ -775,17 +775,17 @@ if __name__ == "__main__":
 
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
-    # save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    # generate_watermark_image(norm=c['normalization'],
-    #                          weight_path=c['weight_path'],
-    #                          target_model=c['target_model'],
-    #                          src_image_path=c['src_image_path'],
-    #                          save_path=c['save_path'],
-    #                          edit_model_name=c['edit_model_name'],
-    #                          num_bits=c['num_bits'],
-    #                          size=c['size'],
-    #                          start_idx=c['start_idx'],
-    #                          end_idx=c['end_idx'])
+    save_and_print_cfg = save_and_print_config(c, c['save_path'])
+    generate_watermark_image(norm=c['normalization'],
+                             weight_path=c['weight_path'],
+                             target_model=c['target_model'],
+                             src_image_path=c['src_image_path'],
+                             save_path=c['save_path'],
+                             edit_model_name=c['edit_model_name'],
+                             num_bits=c['num_bits'],
+                             size=c['size'],
+                             start_idx=c['start_idx'],
+                             end_idx=c['end_idx'])
 
     # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     eval_setting = ["spliced", "spliceless"]
