@@ -22,7 +22,7 @@
             "cwd": "${workspaceFolder}",    // fixed working directory
             "console": "integratedTerminal",
             "env": {
-                "CUDA_VISIBLE_DEVICES": "2"
+                "CUDA_VISIBLE_DEVICES": "3"
             }
         },
                 {

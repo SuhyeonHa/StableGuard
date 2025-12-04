@@ -758,7 +758,7 @@ if __name__ == "__main__":
         'src_image_path': "/mnt/nas5/suhyeon/datasets/valAGE-Set",
         'target_model': "ours", # ["omniguard", "wam", "stableguard", "ours"] # NOTE
         # 'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/256_valAGE_sd_1.2_wm_fix",
-        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/ours/20251203-131512", # NOTE
+        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/ours/20251202-134030", # NOTE
         'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
         'size': 256,
         'start_idx': 0,

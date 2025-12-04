@@ -244,7 +244,7 @@ class LocMark:
             B = cos_sim.shape[0]
             H = W = int(cos_sim.shape[1] ** 0.5)
 
-            target_cosine = self.args.target_cossim + 0.1 # 0.1-0.3
+            target_cosine = self.args.target_cossim # 0.1-0.3
 
             if step==0:
                 print(f"Noise Floor Cosine Similarity: {noise_floor:.4f}")
