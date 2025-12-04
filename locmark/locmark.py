@@ -189,8 +189,9 @@ class LocMark:
             eps0 = torch.randn_like(perturbed_latent) * std_val_0
 
             watermarked_latent = self.pipe.vae.encode(2*watermarked_image-1).latent_dist.sample()
-            perturbed_latent = watermarked_latent + eps0
-            watermarked_image_1 = self.pipe.vae.decode(perturbed_latent).sample
+            # perturbed_latent = watermarked_latent + eps0
+            # watermarked_image_1 = self.pipe.vae.decode(perturbed_latent).sample
+            watermarked_image_1 = self.pipe.vae.decode(watermarked_latent).sample
             watermarked_image_1 = (watermarked_image_1 + 1) / 2
 
             # Compute losses
