@@ -147,8 +147,6 @@ class LocMark:
         # input = F.interpolate(original, size=(self.args.vae_image_size, self.args.vae_image_size), mode="bilinear", align_corners=False)
         # adaptive_weight = self._get_feature_weight(input, min_weight=0.3)
 
-        smoother = torch.nn.AvgPool2d(kernel_size=3, stride=1, padding=1)
-
         # Training loop
         for step in range(self.args.steps):
         # for step in tqdm(range(self.args.steps), desc="Embedding Watermark"):
@@ -171,34 +169,45 @@ class LocMark:
             watermarked_image = self.pipe.vae.decode(perturbed_latent).sample
             watermarked_image = (watermarked_image + 1) / 2
             
-            masked = watermarked_image * mask + (1 - mask) * image
+            # masked = watermarked_image * mask + (1 - mask) * image
 
             # uniform noise
-            latent_mask = F.interpolate(original_mask, size=(64, 64), mode="bilinear", align_corners=False)
+            # latent_mask = F.interpolate(original_mask, size=(64, 64), mode="bilinear", align_corners=False)
             
+            # std_val_0 = random.uniform(self.args.eps0_std[0], self.args.eps0_std[1])
+            # eps0 = torch.randn_like(perturbed_latent) * std_val_0
+
+            # perturbed_latent_1 = (perturbed_latent + eps0)*latent_mask + perturbed_latent*(1-latent_mask)
+
+            # watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
+            # watermarked_image_1 = (watermarked_image_1 + 1) / 2
+            # # masked_1 = (watermarked_image_1 + 1) / 2
+            # # masked_1 = masked_1 * mask + (1 - mask) * image
+
+            # new watermarked image
             std_val_0 = random.uniform(self.args.eps0_std[0], self.args.eps0_std[1])
             eps0 = torch.randn_like(perturbed_latent) * std_val_0
 
-            perturbed_latent_1 = (perturbed_latent + eps0)*latent_mask + perturbed_latent*(1-latent_mask)
-
-            watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
-            masked_1 = (watermarked_image_1 + 1) / 2
-            masked_1 = masked_1 * mask + (1 - mask) * image
+            watermarked_latent = self.pipe.vae.encode(2*watermarked_image-1).latent_dist.sample()
+            perturbed_latent = watermarked_latent + eps0
+            watermarked_image_1 = self.pipe.vae.decode(perturbed_latent).sample
+            watermarked_image_1 = (watermarked_image_1 + 1) / 2
 
             # Compute losses
             image = F.interpolate(original, size=(img_size, img_size), mode="bilinear", align_corners=False)
             mask = F.interpolate(original_mask, size=(img_size, img_size), mode="nearest")
             target_mask = F.interpolate(target_mask, size=(img_size, img_size), mode="bilinear", align_corners=False)
-            masked = F.interpolate(masked, size=(img_size, img_size), mode="bilinear", align_corners=False)
-            masked_1 = F.interpolate(masked_1, size=(img_size, img_size), mode="bilinear", align_corners=False)
+            # masked = F.interpolate(masked, size=(img_size, img_size), mode="bilinear", align_corners=False)
+            # masked_1 = F.interpolate(masked_1, size=(img_size, img_size), mode="bilinear", align_corners=False)
 
             watermarked_image = F.interpolate(watermarked_image, size=(img_size, img_size), mode="bilinear", align_corners=False)
             watermarked_image_1 = F.interpolate(watermarked_image_1, size=(img_size, img_size), mode="bilinear", align_corners=False)
             
             image = norm_imagenet(image)
             watermarked_image = norm_imagenet(watermarked_image)
-            masked = norm_imagenet(masked)
-            masked_1 = norm_imagenet(masked_1)
+            watermarked_image_1 = norm_imagenet(watermarked_image_1)
+            # masked = norm_imagenet(masked)
+            # masked_1 = norm_imagenet(masked_1)
 
             features = self.image_encoder(image)[self.args.feat_layer]
             # features = self.feature_upsampler(image, features, q_chunk_size=3)
@@ -252,8 +261,9 @@ class LocMark:
 
             image = denorm_imagenet(image)
             watermarked_image = denorm_imagenet(watermarked_image)
-            masked = denorm_imagenet(masked)
-            masked_1 = denorm_imagenet(masked_1)
+            watermarked_image_1 = denorm_imagenet(watermarked_image_1)
+            # masked = denorm_imagenet(masked)
+            # masked_1 = denorm_imagenet(masked_1)
 
             loss_psnr = self._psnr_loss(watermarked_image, image)
             loss_lpips = self._lpips_loss(watermarked_image, image)
@@ -316,7 +326,8 @@ class LocMark:
             H = W = int(dot_products.shape[1] ** 0.5)
             grid = dot_products.view(B, H, W).unsqueeze(0) # [1, 1024, 1] -> [1, 1, 32, 32]
             grid = F.interpolate(grid, size=self.args.image_size, mode='bilinear', align_corners=False)
-            scaled_grid = (grid-self.args.target_cossim) * self.args.temperature
+            # scaled_grid = (grid-0.1) * self.args.temperature
+            scaled_grid = grid * self.args.temperature
             confidence_map = torch.sigmoid(scaled_grid)
             binary_prediction = (confidence_map > 0.5).float()
 
