@@ -177,8 +177,7 @@ class LocMark:
             std_val_0 = random.uniform(self.args.eps0_std[0], self.args.eps0_std[1])
             eps0 = torch.randn_like(perturbed_latent) * std_val_0
 
-            # perturbed_latent_1 = (perturbed_latent + eps0)*latent_mask + perturbed_latent*(1-latent_mask)
-            perturbed_latent_1 = perturbed_latent + eps0
+            perturbed_latent_1 = (perturbed_latent + eps0)*latent_mask + perturbed_latent*(1-latent_mask)
 
             watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
             watermarked_image_1 = (watermarked_image_1 + 1) / 2
@@ -271,7 +270,7 @@ class LocMark:
 
             clean_weight = 1.0
             noisy_weight = 1.0
-            
+
             total_loss = clean_weight * (loss_m) + \
                          noisy_weight * (loss_m1) + \
                          loss_h + loss_h1 + \

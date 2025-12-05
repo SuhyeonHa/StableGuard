@@ -758,7 +758,7 @@ if __name__ == "__main__":
         'src_image_path': "/mnt/nas5/suhyeon/datasets/valAGE-Set",
         'target_model': "ours", # ["omniguard", "wam", "stableguard", "ours"] # NOTE
         # 'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/256_valAGE_sd_1.2_wm_fix",
-        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/ours/20251204-083717", # NOTE
+        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/ours/20251205-015948", # NOTE
         'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
         'size': 256,
         'start_idx': 0,
@@ -775,17 +775,17 @@ if __name__ == "__main__":
 
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
-    save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    generate_watermark_image(norm=c['normalization'],
-                             weight_path=c['weight_path'],
-                             target_model=c['target_model'],
-                             src_image_path=c['src_image_path'],
-                             save_path=c['save_path'],
-                             edit_model_name=c['edit_model_name'],
-                             num_bits=c['num_bits'],
-                             size=c['size'],
-                             start_idx=c['start_idx'],
-                             end_idx=c['end_idx'])
+    # save_and_print_cfg = save_and_print_config(c, c['save_path'])
+    # generate_watermark_image(norm=c['normalization'],
+    #                          weight_path=c['weight_path'],
+    #                          target_model=c['target_model'],
+    #                          src_image_path=c['src_image_path'],
+    #                          save_path=c['save_path'],
+    #                          edit_model_name=c['edit_model_name'],
+    #                          num_bits=c['num_bits'],
+    #                          size=c['size'],
+    #                          start_idx=c['start_idx'],
+    #                          end_idx=c['end_idx'])
 
     # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     eval_setting = ["spliced", "spliceless"]
