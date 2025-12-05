@@ -172,26 +172,26 @@ class LocMark:
             # masked = watermarked_image * mask + (1 - mask) * image
 
             # uniform noise
-            # latent_mask = F.interpolate(original_mask, size=(64, 64), mode="bilinear", align_corners=False)
+            latent_mask = F.interpolate(original_mask, size=(64, 64), mode="bilinear", align_corners=False)
             
-            # std_val_0 = random.uniform(self.args.eps0_std[0], self.args.eps0_std[1])
-            # eps0 = torch.randn_like(perturbed_latent) * std_val_0
-
-            # perturbed_latent_1 = (perturbed_latent + eps0)*latent_mask + perturbed_latent*(1-latent_mask)
-
-            # watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
-            # watermarked_image_1 = (watermarked_image_1 + 1) / 2
-            # # masked_1 = (watermarked_image_1 + 1) / 2
-            # # masked_1 = masked_1 * mask + (1 - mask) * image
-
-            # new watermarked image
             std_val_0 = random.uniform(self.args.eps0_std[0], self.args.eps0_std[1])
             eps0 = torch.randn_like(perturbed_latent) * std_val_0
 
-            watermarked_latent = self.pipe.vae.encode(2*watermarked_image-1).latent_dist.sample()
-            perturbed_latent = watermarked_latent + eps0
-            watermarked_image_1 = self.pipe.vae.decode(perturbed_latent).sample
+            perturbed_latent_1 = (perturbed_latent + eps0)*latent_mask + perturbed_latent*(1-latent_mask)
+
+            watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
             watermarked_image_1 = (watermarked_image_1 + 1) / 2
+            # masked_1 = (watermarked_image_1 + 1) / 2
+            # masked_1 = masked_1 * mask + (1 - mask) * image
+
+            # new watermarked image
+            # std_val_0 = random.uniform(self.args.eps0_std[0], self.args.eps0_std[1])
+            # eps0 = torch.randn_like(perturbed_latent) * std_val_0
+
+            # watermarked_latent = self.pipe.vae.encode(2*watermarked_image-1).latent_dist.sample()
+            # perturbed_latent = watermarked_latent + eps0
+            # watermarked_image_1 = self.pipe.vae.decode(perturbed_latent).sample
+            # watermarked_image_1 = (watermarked_image_1 + 1) / 2
 
             # Compute losses
             image = F.interpolate(original, size=(img_size, img_size), mode="bilinear", align_corners=False)
