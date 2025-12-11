@@ -1,3 +1,11 @@
+src_image_path: "/mnt/nas5/suhyeon/datasets/valAGE-Set"
+edit_model_name: "sd-legacy/stable-diffusion-inpainting"
+seed: 42
+eval_size: 256
+target_model: "omniguard" # ["omniguard", "wam", "stableguard]
+save_path: "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/512_valAGE_sd"
+start_idx: 0
+
 weight_paths:
   omniguard: "/mnt/nas5/suhyeon/checkpoints/omniguard/"
   wam: "/mnt/nas5/suhyeon/checkpoints/wam/"
@@ -16,11 +24,8 @@ num_bits:
   stableguard: 48
   ours: 0
 
-defaults:
-  src_image_path: "/mnt/nas5/suhyeon/datasets/valAGE-Set"
-  edit_model_name: "sd-legacy/stable-diffusion-inpainting"
-  seed: 42
-  size: 512
-  target_model: "omniguard" # ["omniguard", "wam", "stableguard]
-  save_path: "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/512_valAGE_sd"
-  start_idx: 0
+train_img_size:
+  omniguard: 512
+  wam: 256
+  stableguard: 256
+  ours: 256

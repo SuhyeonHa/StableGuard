@@ -31,6 +31,7 @@ from omniguard.iml_vit_model import iml_vit_model
 from albumentations.pytorch import ToTensorV2
 from locmark.locmark import LocMark
 from locmark.main import Params
+from omegaconf import OmegaConf
 
 image_mean = torch.tensor([0.485, 0.456, 0.406])
 image_std = torch.tensor([0.229, 0.224, 0.225])
@@ -135,7 +136,7 @@ class Evaluation(object):
     which expose batch_update(predict=..., mask=...) and Cal_FPR(...).
     """
 
-    def __init__(self, pred_path, gt_path) -> None:
+    def __init__(self, pred_path, gt_path, eval_size) -> None:
         """
         Args:
             pred_path (str): directory containing predicted mask images/files.
@@ -143,6 +144,7 @@ class Evaluation(object):
         """
         self.pred_path = pred_path
         self.gt_path = gt_path
+        self.eval_size = eval_size
         # instantiate metric calculators
         self.f1 = PixelF1()
         self.auc = PixelAUC()
@@ -172,6 +174,9 @@ class Evaluation(object):
                 # open predicted mask and corresponding ground-truth mask as grayscale
                 pred_image = Image.open(os.path.join(self.pred_path, pred_image_path)).convert("L")
                 gt_image = Image.open(os.path.join(self.gt_path, pred_image_path)).convert("L")
+
+                pred_image = pred_image.resize((self.eval_size, self.eval_size))
+                gt_image = gt_image.resize((self.eval_size, self.eval_size))
             except Exception:
                 # skip files that cannot be opened / matched
                 continue
@@ -217,7 +222,7 @@ class Evaluation_Fidelity(object):
     computes image-similarity metrics (PSNR/SSIM/LPIPS).
     """
 
-    def __init__(self, wm_path, ori_path, img_size) -> None:
+    def __init__(self, wm_path, ori_path, eval_size) -> None:
         """
         Args:
             wm_path (str): directory containing watermarked images.
@@ -225,7 +230,7 @@ class Evaluation_Fidelity(object):
         """
         self.wm_path = wm_path
         self.ori_path = ori_path
-        self.img_size = img_size
+        self.eval_size = eval_size
 
     def run(self, save_path):
         """
@@ -249,7 +254,8 @@ class Evaluation_Fidelity(object):
                 wm_image = Image.open(os.path.join(self.wm_path, wm_image_path)).convert("RGB")
                 ori_image = Image.open(os.path.join(self.ori_path, wm_image_path)).convert("RGB")
 
-                ori_image = ori_image.resize((self.img_size, self.img_size))
+                ori_image = ori_image.resize((self.eval_size, self.eval_size))
+                wm_image = wm_image.resize((self.eval_size, self.eval_size))
             except Exception:
                 # skip files that cannot be opened / matched
                 continue
@@ -259,7 +265,7 @@ class Evaluation_Fidelity(object):
             ori_tensor = T.ToTensor()(ori_image).unsqueeze(0)
 
             # resize ground-truth to match predicted mask spatial size if needed
-            ori_tensor = torch.nn.functional.interpolate(ori_tensor, (wm_tensor.size(2), wm_tensor.size(3)))
+            # ori_tensor = torch.nn.functional.interpolate(ori_tensor, (wm_tensor.size(2), wm_tensor.size(3)))
 
             # call evaluator batch_update for each metric (these update internal state or return stat)
             psnr_value = psnr(wm_tensor, ori_tensor).mean()
@@ -284,7 +290,7 @@ class Evaluation_Fidelity(object):
 
 
 @torch.no_grad()
-def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, num_bits=48, size=512, start_idx=0, end_idx=None):
+def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, num_bits=48, model_size=512, eval_size=256, start_idx=0, end_idx=None):
     """
     Generate watermarked and tampered images from a source dataset using:
       - a pretrained diffusion VAE for reconstructing images (AutoencoderKL),
@@ -312,7 +318,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
     # load pretrained diffusion VAE (encoder/decoder)
     original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suhyeon/caches/').to('cuda')
-    pipe = StableDiffusionInpaintPipeline.from_pretrained(edit_model_name, cache_dir='/mnt/nas5/suhyeon/caches/').to('cuda')
+    pipe = StableDiffusionInpaintPipeline.from_pretrained(edit_model_name, cache_dir='/mnt/nas5/suhyeon/caches/', safety_checker=None).to('cuda')
     generator = torch.Generator().manual_seed(42)
 
     # load model
@@ -339,7 +345,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         net.load_state_dict(network_state_dict)
 
     # prepare dataloader for validation images
-    val_dataset = AGEDataset(data_root=src_image_path, norm_type=norm, mode="val", size=size)
+    val_dataset = AGEDataset(data_root=src_image_path, norm_type=norm, mode="val", size=eval_size)
     val_dataloader = DataLoader(
         val_dataset,
         shuffle=False,
@@ -348,19 +354,6 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         num_workers=4,
         drop_last=False,
     )
-
-    # accumulators for image-similarity metrics (per-image appended scalars)
-    # sd_real_psnr_list = []
-    # sd_real_ssim_list = []
-    # sd_real_lpips_list = []
-
-    wm_real_psnr_list = []
-    wm_real_ssim_list = []
-    wm_real_lpips_list = []
-
-    # wm_sd_psnr_list = []
-    # wm_sd_ssim_list = []
-    # wm_sd_lpips_list = []
 
     if start_idx > 0:
         print(f"Resuming from index {start_idx}...")
@@ -386,7 +379,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             # stableguard is trained on 256x256 images
             # VAE encode -> sample latents -> decode back to image (reconstruction)
             latents = original_vae.encode(images).latent_dist.sample()
-            decode_images = original_vae.decode(latents, return_dict=False)[0]
+            # decode_images = original_vae.decode(latents, return_dict=False)[0]
 
             # prepare latents for the watermark decoder (post-quant conv if required by model)
             latents = original_vae.post_quant_conv(latents)
@@ -400,28 +393,28 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
         elif target_model == "wam":
             # normalization: imagenet
-            decode_images = torch.zeros_like(images)
-            images_down = F.interpolate(images, size=(256, 256), mode="bilinear", align_corners=False)
+            # decode_images = torch.zeros_like(images)
+            images_down = F.interpolate(images, size=(model_size, model_size), mode="bilinear", align_corners=False)
             msgs = wam.get_random_msg(1)
             outputs = wam.embed(images_down, msgs)
             cover_images = outputs['imgs_w']
-            cover_images = F.interpolate(cover_images, size=(size, size), mode="bilinear", align_corners=False)
+            # cover_images = F.interpolate(cover_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
             cover_images = denorm_imagenet(cover_images) # [0, 1]
             # cover_images = denormalize_tensor(cover_images, scale_each=True) # [0, 1]
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
         
         elif target_model == "omniguard":
-            decode_images = torch.zeros_like(images)
+            # decode_images = torch.zeros_like(images)
             dwt = DWT()
-            image = Image.open("./omniguard/bluesky_white2.png").convert("RGB").resize((size, size))
+            image = Image.open("./omniguard/bluesky_white2.png").convert("RGB").resize((model_size, model_size))
             result = np.array(image) / 255.
             expanded_matrix = np.expand_dims(result, axis=0) 
             secret = torch.from_numpy(np.ascontiguousarray(expanded_matrix)).float()
             secret = secret.permute(0, 3, 1, 2).cuda()
 
             # omniguard is trained on 512x512 images
-            cover_input = F.interpolate(images, size=(512, 512), mode="bilinear", align_corners=False)
-            secret_input = F.interpolate(secret, size=(512, 512), mode="bilinear", align_corners=False)
+            cover_input = F.interpolate(images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+            secret_input = F.interpolate(secret, size=(model_size, model_size), mode="bilinear", align_corners=False)
 
             cover_input = dwt((cover_input + 1.0) / 2.0) # [-1, 1] to [0, 1], [1, 12, 256, 256]
             secret_input = dwt(secret_input) # [1, 12, 256, 256]
@@ -436,10 +429,11 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             # save_path will be: /mnt/nas5/suhyeon/projects/eval_spliceless/ours/exp_num
             cover_path = os.path.join(save_path, 'cover_images')
             # TODO: error handling
-            cover_images = Image.open(os.path.join(cover_path, image_names[0])).convert("RGB").resize((size, size))
+            cover_images = Image.open(os.path.join(cover_path, image_names[0])).convert("RGB").resize((model_size, model_size))
             cover_images = ToTensor()(cover_images).unsqueeze(0).cuda() # [0, 1]
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
-        # inpaint
+        
+        # inpaint and splice in 512x512
         inpaint_input = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
         generated_images = pipe(prompt="", image=inpaint_input, mask_image=masks, generator=generator).images[0]
 
@@ -449,50 +443,20 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
         # spliced images: replace regions indicated by mask with generated content
         # spliceless images: just the generated image without splicing
-        generated_images = F.interpolate(generated_images, size=(size, size), mode="bilinear", align_corners=False)
-        cover_images = F.interpolate(cover_images, size=(size, size), mode="bilinear", align_corners=False)
-        spliced_images = masks * generated_images + (1 - masks) * cover_images # operation in [-1, 1]
-        spliceless_images = generated_images
-
-        # composite at 512x512, then downsample to original size
-        # masks = F.interpolate(masks, size=(512, 512), mode="nearest")
+        # generated_images = F.interpolate(generated_images, size=(size, size), mode="bilinear", align_corners=False)
+        # cover_images = F.interpolate(cover_images, size=(size, size), mode="bilinear", align_corners=False)
         # spliced_images = masks * generated_images + (1 - masks) * cover_images # operation in [-1, 1]
         # spliceless_images = generated_images
 
-        # spliced_images = F.interpolate(spliced_images, size=(size, size), mode="bilinear", align_corners=False)
-        # spliceless_images = F.interpolate(spliceless_images, size=(size, size), mode="bilinear", align_corners=False)
-        # cover_images = F.interpolate(cover_images, size=(size, size), mode="bilinear", align_corners=False)
-        
-        # compute image similarity metrics and append their values (per-image scalars)
-        # sd_real_psnr_list.append(
-        #     psnr(denormalize_tensor(images), denormalize_tensor(decode_images), data_range=1).item()
-        # )
-        # sd_real_ssim_list.append(
-        #     ssim(denormalize_tensor(images), denormalize_tensor(decode_images), data_range=1).item()
-        # )
-        # sd_real_lpips_list.append(
-        #     LPIPS(reduction='none')(denormalize_tensor(images), denormalize_tensor(decode_images)).mean().item()
-        # )
+        # composite at 512x512, then downsample to original size
+        masks = F.interpolate(masks, size=(512, 512), mode="nearest")
+        spliced_images = masks * generated_images + (1 - masks) * cover_images # operation in [-1, 1]
+        spliceless_images = generated_images
 
-        wm_real_psnr_list.append(
-            psnr(denormalize_tensor(images), denormalize_tensor(cover_images), data_range=1).item()
-        )
-        wm_real_ssim_list.append(
-            ssim(denormalize_tensor(images), denormalize_tensor(cover_images), data_range=1).item()
-        )
-        wm_real_lpips_list.append(
-            LPIPS(reduction='none')(denormalize_tensor(images), denormalize_tensor(cover_images)).mean().item()
-        )
-
-        # wm_sd_psnr_list.append(
-        #     psnr(denormalize_tensor(decode_images), denormalize_tensor(cover_images), data_range=1).item()
-        # )
-        # wm_sd_ssim_list.append(
-        #     ssim(denormalize_tensor(decode_images), denormalize_tensor(cover_images), data_range=1).item()
-        # )
-        # wm_sd_lpips_list.append(
-        #     LPIPS(reduction='none')(denormalize_tensor(decode_images), denormalize_tensor(cover_images)).mean().item()
-        # )
+        # adjust to each model's training size
+        spliced_images = F.interpolate(spliced_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+        spliceless_images = F.interpolate(spliceless_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+        cover_images = F.interpolate(cover_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
 
         # save per-image outputs: cover, tamper, ground-truth mask, and message vector
         for i in range(images.size(0)):
@@ -537,24 +501,9 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
             # torch.save(msg, os.path.join(save_path, 'msgs', save_file_name.split(".")[0] + '.pt'))
 
-    # After processing all batches, summarise the image-similarity metrics across the dataset
-    # SD vs Real:  similarity between original image and VAE reconstruction
-    # WM vs Real:  similarity between original image and watermarked image
-    # WM vs SD:    similarity between watermarked image and VAE reconstruction
-    # note: main error source often comes from the diffusion VAE reconstruction
-    # msg = f"SD vs Real | PSNR: {np.mean(sd_real_psnr_list):.5f}, SSIM: {np.mean(sd_real_ssim_list):.5f}, LPIPS: {np.mean(sd_real_lpips_list):.5f} \n"
-    msg = f"WM vs Real | PSNR: {np.mean(wm_real_psnr_list):.5f}, SSIM: {np.mean(wm_real_ssim_list):.5f}, LPIPS: {np.mean(wm_real_lpips_list):.5f} \n"
-    # msg += f"WM vs SD   | PSNR: {np.mean(wm_sd_psnr_list):.5f}, SSIM: {np.mean(wm_sd_ssim_list):.5f}, LPIPS: {np.mean(wm_sd_lpips_list):.5f} \n"
-    msg += "-" * 100 + "\n"
-    print(msg)
-
-    # write summary into record.txt (overwrite previous content)
-    with open(os.path.join(save_path, "record.txt"), "w") as f:
-        f.write(msg)
-
 
 @torch.no_grad()
-def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num_bits=48, size=512, end_idx=None):
+def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num_bits=48, model_size=512, end_idx=None):
     """
     Use the trained forensic network (MoEGuidedForensicNet) to predict:
       - the embedded messages for each tampered image
@@ -602,7 +551,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
     # iterate files and run inference on each image (single-image inference)
     for image_path in tqdm(image_paths):
         # load and resize image to expected input size
-        image = Image.open(os.path.join(tamper_image_path, image_path)).resize((size, size))
+        image = Image.open(os.path.join(tamper_image_path, image_path)).resize((model_size, model_size))
 
         if target_model == "stableguard":
             transform = transforms.Compose([
@@ -635,15 +584,14 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
                 transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
             ])
             image = transform(image).unsqueeze(0).cuda()  # shape [1, C, H, W]
-            image_down = F.interpolate(image, size=(256, 256), mode="bilinear", align_corners=False)
+            image_down = F.interpolate(image, size=(model_size, model_size), mode="bilinear", align_corners=False)
 
             outputs = wam.detect(image_down)["preds"]
             pred_mask = F.sigmoid(outputs[:, 0, :, :]).unsqueeze(0) # [1, 1, 256, 256]
             pred_bit = outputs[:, 1:, :, :] # [1, 32, 256, 256]
             pred_message = msg_predict_inference(pred_bit, pred_mask).cpu().float()  # [1, 32]
             
-            pred_mask = F.interpolate(pred_mask, size=(size, size), mode="bilinear", align_corners=False)
-            # WAM predicts the non-tampered region, so invert the mask
+            # WAM predicts the watermarked region
             save_image(pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
 
             # load ground-truth message that was saved earlier during generation step
@@ -655,7 +603,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             dwt = DWT()
             iwt = IWT()
             transform = transforms.Compose([
-                transforms.Resize((512, 512)),
+                transforms.Resize((model_size, model_size)),
                 transforms.ToTensor(),
             ])
             transform_extractor = albu.Compose([
@@ -683,8 +631,8 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             fuse = transform_extractor(image=fuse)['image'].cuda().unsqueeze(0)
 
             pred_mask = extractor(artifact, fuse)
-            pred_mask = pred_mask[:, :, 0:512, 0:512]
-            pred_mask = F.interpolate(pred_mask, size=(size, size), mode="bilinear", align_corners=False)
+            pred_mask = pred_mask[:, :, 0:model_size, 0:model_size]
+            pred_mask = F.interpolate(pred_mask, size=(model_size, model_size), mode="bilinear", align_corners=False)
 
             # save predicted mask image to disk
             save_image(1-pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
@@ -749,43 +697,38 @@ def save_and_print_config(config, save_path):
     print(f"Configuration saved to: {config_path}")
     print("-" * 30)
 
-
 if __name__ == "__main__":
-    with open('config.yaml', 'r') as f:
-        default_config = yaml.safe_load(f)
-    # ------------------ Configuration ------------------
-    run_config = {
-        'src_image_path': "/mnt/nas5/suhyeon/datasets/valAGE-Set",
-        'target_model': "ours", # ["omniguard", "wam", "stableguard", "ours"] # NOTE
-        # 'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/256_valAGE_sd_1.2_wm_fix",
-        'save_path': "/mnt/nas5/suhyeon/projects/eval_spliceless/ours/20251205-015948", # NOTE
-        'edit_model_name': "sd-legacy/stable-diffusion-inpainting",
-        'size': 256,
-        'start_idx': 0,
-        'end_idx': 100,
-    }
-    # ---------------------------------------------------
+    base_conf = OmegaConf.load('config.yaml')
+    cli_conf = OmegaConf.from_cli()
+    final_conf = OmegaConf.merge(base_conf, cli_conf)
+    c = OmegaConf.to_container(final_conf, resolve=True)
+    
+    # model-specific settings
+    model_name = c['target_model']
+    c['weight_path'] = c['weight_paths'][model_name]
+    c['normalization'] = c['normalization'][model_name]
+    c['num_bits'] = c['num_bits'][model_name]
+    c['model_size'] = c['train_img_size'][model_name]
 
-    c = {}
-    c.update(default_config['defaults'])
-    c.update(run_config)
-    c['weight_path'] = default_config['weight_paths'][c['target_model']]
-    c['normalization'] = default_config['normalization'][c['target_model']]
-    c['num_bits'] = default_config['num_bits'][c['target_model']]
+    print("-" * 30)
+    print("Running Configuration:")
+    print(OmegaConf.to_yaml(final_conf))
+    print("-" * 30)
 
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
-    # save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    # generate_watermark_image(norm=c['normalization'],
-    #                          weight_path=c['weight_path'],
-    #                          target_model=c['target_model'],
-    #                          src_image_path=c['src_image_path'],
-    #                          save_path=c['save_path'],
-    #                          edit_model_name=c['edit_model_name'],
-    #                          num_bits=c['num_bits'],
-    #                          size=c['size'],
-    #                          start_idx=c['start_idx'],
-    #                          end_idx=c['end_idx'])
+    save_and_print_cfg = save_and_print_config(c, c['save_path'])
+    generate_watermark_image(norm=c['normalization'],
+                             weight_path=c['weight_path'],
+                             target_model=c['target_model'],
+                             src_image_path=c['src_image_path'],
+                             save_path=c['save_path'],
+                             edit_model_name=c['edit_model_name'],
+                             num_bits=c['num_bits'],
+                             model_size=c['model_size'],
+                             eval_size=c['eval_size'],
+                             start_idx=c['start_idx'],
+                             end_idx=c['end_idx'])
 
     # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     eval_setting = ["spliced", "spliceless"]
@@ -795,12 +738,12 @@ if __name__ == "__main__":
                             target_model=c['target_model'],
                             save_path=c['save_path'],
                             num_bits=c['num_bits'],
-                            size=c['size'],
+                            model_size=c['model_size'],
                             end_idx=c['end_idx'])
         # 3) Evaluate predicted masks against ground-truth masks saved in disk
-        eva = Evaluation(f"{c['save_path']}/pred_mask_{setting}", f"{c['save_path']}/gt")
+        eva = Evaluation(f"{c['save_path']}/pred_mask_{setting}", f"{c['save_path']}/gt", eval_size=c['eval_size'])
         eva.run(f"{c['save_path']}/pred_mask_{setting}")
 
     # 4) Evaluate fidelity between watermarked and original images
-    eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", img_size=c['size'])
+    eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'])
     eva_fid.run(f"{c['save_path']}/cover_images")
