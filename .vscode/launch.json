@@ -34,7 +34,12 @@
             "console": "integratedTerminal",
             "env": {
                 "CUDA_VISIBLE_DEVICES": "2"
-            }
+            },
+            "args": [
+                "target_model=omniguard",
+                "save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/all_512_eval_256",
+                "tamper_mode=zero_mask"
+            ]
         }
     ]
 }
