@@ -329,9 +329,9 @@ class LocMark:
             # scaled_grid = (grid-0.1) * self.args.temperature
             scaled_grid = grid * self.args.temperature
             confidence_map = torch.sigmoid(scaled_grid)
-            binary_prediction = (confidence_map > 0.5).float()
+            # binary_prediction = (confidence_map > 0.5).float()
 
-        return binary_prediction
+        return confidence_map
     
     def _psnr_loss(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Negative PSNR loss (Equation 5)"""

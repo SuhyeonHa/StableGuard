@@ -541,6 +541,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
 
     # make output folder for predicted masks
     os.makedirs(os.path.join(save_path, f"pred_mask_{exp_suffix}"), exist_ok=True)
+    # os.makedirs(os.path.join(save_path, f"augmented_image_{exp_suffix}"), exist_ok=True)
     tamper_image_path = os.path.join(save_path, f"{eval_setting}_images")
 
     valid_exts = (".jpg", ".jpeg", ".png")
@@ -602,7 +603,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             pred_mask = torch.sigmoid(pred_mask)
 
             # save predicted mask image to disk
-            save_image(1-pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
+            save_image(1-pred_mask, os.path.join(save_path, f"pred_mask_{exp_suffix}", image_path), normalize=False, scale_each=True)
 
             # load ground-truth message that was saved earlier during generation step
             # save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
@@ -627,7 +628,8 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             pred_message = msg_predict_inference(pred_bit, pred_mask).cpu().float()  # [1, 32]
             
             # WAM predicts the watermarked region
-            save_image(pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
+            save_image(denorm_imagenet(image), os.path.join(save_path, f"augmented_image_{exp_suffix}", image_path), normalize=False, scale_each=False)
+            save_image(pred_mask, os.path.join(save_path, f"pred_mask_{exp_suffix}", image_path), normalize=False, scale_each=True)
 
             # load ground-truth message that was saved earlier during generation step
             # save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
@@ -670,7 +672,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             pred_mask = F.interpolate(pred_mask, size=(model_size, model_size), mode="bilinear", align_corners=False)
 
             # save predicted mask image to disk
-            save_image(1-pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
+            save_image(1-pred_mask, os.path.join(save_path, f"pred_mask_{exp_suffix}", image_path), normalize=False, scale_each=True)
 
             # load ground-truth message that was saved earlier during generation step
             # 64 bits (training) + zero-padding
@@ -701,7 +703,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             pred_mask = locmark.decode_watermark(image.cuda())
 
             # save predicted mask image to disk
-            save_image(pred_mask, os.path.join(save_path, f"pred_mask_{eval_setting}", image_path), normalize=False, scale_each=True)
+            save_image(pred_mask, os.path.join(save_path, f"pred_mask_{exp_suffix}", image_path), normalize=False, scale_each=False)
             
     # write bit accuracy summary to record file (append)
     # msg = f"Bit Acc:{np.mean(bit_acc):.5f} \n"
@@ -753,6 +755,8 @@ if __name__ == "__main__":
         eval_setting = ["zero_mask"]
     elif c['tamper_mode'] == 'vae_regen':
         eval_setting = ["vae_regen"]
+    elif c['tamper_mode'] == 'cover':
+        eval_setting = ["cover"]
 
     print("-" * 30)
     print("Running Configuration:")
@@ -762,18 +766,18 @@ if __name__ == "__main__":
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
     # save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    generate_watermark_image(norm=c['normalization'],
-                             weight_path=c['weight_path'],
-                             target_model=c['target_model'],
-                             src_image_path=c['src_image_path'],
-                             save_path=c['save_path'],
-                             edit_model_name=c['edit_model_name'],
-                             num_bits=c['num_bits'],
-                             model_size=c['model_size'],
-                             eval_size=c['eval_size'],
-                             start_idx=c['start_idx'],
-                             end_idx=c['end_idx'],
-                             tamper_mode=c['tamper_mode'])
+    # generate_watermark_image(norm=c['normalization'],
+    #                          weight_path=c['weight_path'],
+    #                          target_model=c['target_model'],
+    #                          src_image_path=c['src_image_path'],
+    #                          save_path=c['save_path'],
+    #                          edit_model_name=c['edit_model_name'],
+    #                          num_bits=c['num_bits'],
+    #                          model_size=c['model_size'],
+    #                          eval_size=c['eval_size'],
+    #                          start_idx=c['start_idx'],
+    #                          end_idx=c['end_idx'],
+    #                          tamper_mode=c['tamper_mode'])
 
     # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions    
     for setting in eval_setting:
