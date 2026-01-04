@@ -30,7 +30,7 @@ class Params:
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0034.png'
         self.exp_name = 'masked_noise'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
-        self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours_random_mean' # NOTE: multi image optimization, exp_name
+        self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours_mean' # NOTE: multi image optimization, exp_name
         # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
         self.single_image_mode = False # NOTE
         self.num_test_images = 100 # the first n images
