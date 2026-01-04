@@ -44,7 +44,7 @@ class LocMark:
         # self.direction_vectors = torch.load('/mnt/nas5/suhyeon/projects/freq-loc/random_vec.pt').to(self.args.device)
         # self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/random_vec_univ_{self.args.feature_dim}.pt').to(self.args.device)
         self.direction_vectors = self.generate_universal_vectors(self.args.feature_dim)
-        torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_random_{self.args.feature_dim}.pt')
+        torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_random_mean_{self.args.feature_dim}.pt')
         self.num_patches = (self.args.image_size // 14) ** 2
 
         self.loss_fn_vgg = lpips.LPIPS(net='alex').to(self.args.device)
@@ -60,7 +60,7 @@ class LocMark:
         
         # 2. [핵심] Zero-Mean Centering (평균 제거)
         # 각 벡터(row)의 평균을 계산해서 뺌 -> 합이 0이 됨
-        # vecs = vecs - vecs.mean(dim=1, keepdim=True)
+        vecs = vecs - vecs.mean(dim=1, keepdim=True)
         
         # 3. Sign Quantization (강건성 향상)
         # 0인 경우를 방지하기 위해 아주 작은 noise 추가 후 sign
