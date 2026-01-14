@@ -28,7 +28,7 @@ class Params:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0034.png'
-        self.exp_name = 'pgd-8-255' # NOTE
+        self.exp_name = 'pgd-20-255' # NOTE
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
         self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours_full' # NOTE: multi image optimization, exp_name
         # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
@@ -64,7 +64,7 @@ class Params:
         self.lambda_p = 0.1 #0.05 #0.025
         self.lambda_i = 0.05 #0.01 #0.005
         self.feat_layer = 1
-        self.epsilon = 8.0 / 255.0
+        self.epsilon = 20.0 / 255.0
 
         # --- Robustness Parameters --- 
         self.eps0_std = [0.0, 0.25] # Latent noise
@@ -165,6 +165,7 @@ def run_locmark(args=None, save_dir=None):
             torchvision.utils.save_image(watermarked.cpu(), os.path.join(save_dir, "cover_images", filename))
             torchvision.utils.save_image(watermark.cpu()*5, os.path.join(save_dir, "watermark", filename))
             torchvision.utils.save_image(prediction.cpu(), os.path.join(save_dir, "prediction", filename))
+            torchvision.utils.save_image(bin_prediction.cpu(), os.path.join(save_dir, "bin_prediction", filename))
 
             psnr = locmark._compute_psnr(original, watermarked)
             results[filename] = psnr
