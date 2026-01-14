@@ -43,8 +43,9 @@ class LocMark:
         
         # self.direction_vectors = torch.load('/mnt/nas5/suhyeon/projects/freq-loc/random_vec.pt').to(self.args.device)
         # self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/random_vec_univ_{self.args.feature_dim}.pt').to(self.args.device)
-        self.direction_vectors = self.generate_universal_vectors(self.args.feature_dim)
-        torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_ones_{self.args.feature_dim}.pt')
+        self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt').to(self.args.device)
+        # self.direction_vectors = self.generate_universal_vectors(self.args.feature_dim)
+        # torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_ones_{self.args.feature_dim}.pt')
         self.num_patches = (self.args.image_size // 14) ** 2
 
         self.loss_fn_vgg = lpips.LPIPS(net='alex').to(self.args.device)
@@ -55,17 +56,17 @@ class LocMark:
         어떤 Feature가 들어와도 DC 성분(크기)을 무시하고 
         방향만 검출할 수 있는 Universal Vector 생성
         """
-        vecs = torch.ones(1, feature_dim)
+        # vecs = torch.ones(1, feature_dim)
         # 1. 랜덤 생성
-        # vecs = torch.randn(1, feature_dim)
+        vecs = torch.randn(1, feature_dim)
         
         # # 2. [핵심] Zero-Mean Centering (평균 제거)
         # # 각 벡터(row)의 평균을 계산해서 뺌 -> 합이 0이 됨
-        # vecs = vecs - vecs.mean(dim=1, keepdim=True)
+        vecs = vecs - vecs.mean(dim=1, keepdim=True)
         
         # # 3. Sign Quantization (강건성 향상)
         # # 0인 경우를 방지하기 위해 아주 작은 noise 추가 후 sign
-        # vecs = torch.sign(vecs + 1e-6)
+        vecs = torch.sign(vecs + 1e-6)
         
         # 4. L2 Normalization
         vecs = vecs / torch.norm(vecs, p=2, dim=1, keepdim=True)
@@ -330,9 +331,9 @@ class LocMark:
             # scaled_grid = (grid-0.1) * self.args.temperature
             scaled_grid = grid * self.args.temperature
             confidence_map = torch.sigmoid(scaled_grid)
-            # binary_prediction = (confidence_map > 0.5).float()
+            binary_prediction = (confidence_map > 0.5).float()
 
-        return confidence_map
+        return grid, confidence_map, binary_prediction
     
     def _psnr_loss(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Negative PSNR loss (Equation 5)"""

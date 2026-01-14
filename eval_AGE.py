@@ -423,7 +423,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         if tamper_mode == 'inpaint':
             # inpaint and splice in 512x512
             inpaint_input = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
-            generated_images = pipe(prompt="", image=inpaint_input, mask_image=masks, generator=generator).images[0]
+            generated_images = pipe(prompt="", image=inpaint_input, mask_image=masks, generator=generator, num_inference_steps=50).images[0]
 
             # pil to tensor, normalize to [-1,1], add batch dim
             generated_images = ToTensor()(generated_images).cuda()
@@ -431,7 +431,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
             # composite at 512x512, then downsample to original size
             masks = F.interpolate(masks, size=(512, 512), mode="nearest")
-            spliced_images = masks * generated_images + (1 - masks) * cover_images # operation in [-1, 1]
+            spliced_images = masks * generated_images + (1 - masks) * inpaint_input # operation in [-1, 1]
             spliceless_images = generated_images
 
             # adjust to each model's training size
@@ -485,7 +485,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         elif tamper_mode == 'zero_mask':
             inpaint_input = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
             zero_mask = torch.zeros((1, 1, 512, 512), dtype=inpaint_input.dtype, device=inpaint_input.device)
-            generated_images = pipe(prompt="", image=inpaint_input, mask_image=zero_mask, generator=generator).images[0]
+            generated_images = pipe(prompt="", image=inpaint_input, mask_image=zero_mask, generator=generator, num_inference_steps=20).images[0]
 
             # adjust to each model's training size
             generated_images = ToTensor()(generated_images).unsqueeze(0).cuda()
@@ -541,6 +541,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
 
     # make output folder for predicted masks
     os.makedirs(os.path.join(save_path, f"pred_mask_{exp_suffix}"), exist_ok=True)
+    os.makedirs(os.path.join(save_path, f"pred_bin_mask_{exp_suffix}"), exist_ok=True)
     # os.makedirs(os.path.join(save_path, f"augmented_image_{exp_suffix}"), exist_ok=True)
     tamper_image_path = os.path.join(save_path, f"{eval_setting}_images")
 
@@ -576,12 +577,19 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
     if end_idx is not None:
         image_paths = image_paths[:end_idx]
 
+    # for cossim dist. figure
+    # in_logits_list = []
+    # out_logits_list = []
+    # logits_list = []
+
     attack_transform = get_robustness_transform(aug_type, aug_param, image_size=model_size)
 
     # iterate files and run inference on each image (single-image inference)
     for image_path in tqdm(image_paths):
         # load and resize image to expected input size
         image = Image.open(os.path.join(tamper_image_path, image_path)).resize((model_size, model_size))
+        # mask = Image.open(os.path.join(save_path, "gt", image_path)).convert('L').resize((model_size, model_size))
+        # clean = Image.open(os.path.join('/mnt/nas5/suhyeon/datasets/valAGE-Set', image_path)).convert('RGB').resize((model_size, model_size))
 
         if attack_transform is not None:
             image_att = np.array(image)
@@ -698,13 +706,43 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
                 transforms.ToTensor(),
             ])
             image = transform(image).unsqueeze(0)  # shape [1, C, H, W]
+            # clean = transform(clean).unsqueeze(0)
 
             # run detector on GPU
-            pred_mask = locmark.decode_watermark(image.cuda())
+            logits, pred_mask, bin_prediction = locmark.decode_watermark(image.cuda())
 
             # save predicted mask image to disk
             save_image(pred_mask, os.path.join(save_path, f"pred_mask_{exp_suffix}", image_path), normalize=False, scale_each=False)
+            save_image(bin_prediction, os.path.join(save_path, f"pred_bin_mask_{exp_suffix}", image_path), normalize=False, scale_each=False)
+
+            # for cossim dist. single.
+            # flat_logits = logits.detach().cpu().numpy().flatten()
+            # logits_list.extend(flat_logits.tolist())
+
+            # for figure dist. mask.
+            # mask = transform(mask).unsqueeze(0)
+
+            # flat_logits = logits.squeeze() 
+            # flat_mask = mask.squeeze()
+
+            # mask_inside = (flat_mask == 1)
+            # mask_outside = (flat_mask == 0)
+
+            # inside_vals = flat_logits[mask_inside].detach().cpu().numpy().flatten()
+            # outside_vals = flat_logits[mask_outside].detach().cpu().numpy().flatten()
             
+            # in_logits_list.extend(inside_vals)
+            # out_logits_list.extend(outside_vals)
+    
+    # single
+    # np.savez_compressed(f"./logits_clean.npz", logits=logits_list)
+
+    # mask
+    # inside_arr = np.array(in_logits_list)
+    # outside_arr = np.array(out_logits_list)
+    # np.savez_compressed(f"./logits_{exp_suffix}_in.npz", logits=inside_arr)
+    # np.savez_compressed(f"./logits_{exp_suffix}_out.npz", logits=outside_arr)
+
     # write bit accuracy summary to record file (append)
     # msg = f"Bit Acc:{np.mean(bit_acc):.5f} \n"
     # msg += "-" * 100 + "\n"
@@ -791,7 +829,7 @@ if __name__ == "__main__":
                             aug_type=c['aug_type'],
                             aug_param=c['aug_param'])
         # 3) Evaluate predicted masks against ground-truth masks saved in disk
-        eva = Evaluation(f"{c['save_path']}/pred_mask_{setting}", f"{c['save_path']}/gt", eval_size=c['eval_size'])
+        eva = Evaluation(f"{c['save_path']}/pred_bin_mask_{setting}", f"{c['save_path']}/gt", eval_size=c['eval_size'])
         eva.run(f"{c['save_path']}/pred_mask_{setting}")
 
     # # 4) Evaluate fidelity between watermarked and original images

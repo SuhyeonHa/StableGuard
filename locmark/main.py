@@ -124,7 +124,7 @@ def run_locmark(args=None, save_dir=None):
             original = F.interpolate(original, size=(args.image_size, args.image_size), mode="bilinear", align_corners=False)
             watermarked = F.interpolate(watermarked, size=(args.image_size, args.image_size), mode="bilinear", align_corners=False)
             watermark = F.interpolate(watermark, size=(args.image_size, args.image_size), mode="bilinear", align_corners=False)
-            prediction = locmark.decode_watermark(watermarked)
+            logits, prediction, bin_prediction = locmark.decode_watermark(watermarked)
 
             # Save images
             vis_results = [original, watermarked, prediction, watermark]
@@ -159,7 +159,7 @@ def run_locmark(args=None, save_dir=None):
             original = F.interpolate(original, size=(args.image_size, args.image_size), mode="bilinear", align_corners=False)
             watermarked = F.interpolate(watermarked, size=(args.image_size, args.image_size), mode="bilinear", align_corners=False)
             watermark = F.interpolate(watermark, size=(args.image_size, args.image_size), mode="bilinear", align_corners=False)
-            prediction = locmark.decode_watermark(watermarked)
+            logits, prediction, bin_prediction = locmark.decode_watermark(watermarked)
 
             torchvision.utils.save_image(watermarked.cpu(), os.path.join(save_dir, "cover_images", filename))
             torchvision.utils.save_image(watermark.cpu()*5, os.path.join(save_dir, "watermark", filename))
