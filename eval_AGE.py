@@ -756,7 +756,7 @@ def save_and_print_config(config, save_path):
     """
     os.makedirs(save_path, exist_ok=True)
     
-    config_path = os.path.join(save_path, "config.yaml")
+    config_path = os.path.join(save_path, "config_eval.yaml")
 
     print("-" * 30)
     print(" " * 10 + "Configuration")
