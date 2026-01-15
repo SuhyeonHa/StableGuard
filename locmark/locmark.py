@@ -171,9 +171,9 @@ class LocMark:
             watermarked_image = self.pipe.vae.decode(perturbed_latent).sample
             watermarked_image = (watermarked_image + 1) / 2
 
-            # clamping
+            # projection
             delta_w = watermarked_image - image
-            delta_w = torch.clamp(delta_w, -self.args.epsilon, self.args.epsilon)
+            delta_w = delta_w.renorm(p=2, dim=0, maxnorm=self.args.epsilon)
             watermarked_image = image + delta_w
             watermarked_image = torch.clamp(watermarked_image, 0, 1)
 
@@ -201,15 +201,15 @@ class LocMark:
             # watermarked_image_1 = self.pipe.vae.decode(perturbed_latent).sample
             # watermarked_image_1 = (watermarked_image_1 + 1) / 2
 
-            # clamping
+            # projection
             delta_w_1 = watermarked_image_1 - image
-            delta_w_1 = torch.clamp(delta_w_1, -self.args.epsilon, self.args.epsilon)
+            delta_w_1 = delta_w_1.renorm(p=2, dim=0, maxnorm=self.args.epsilon)
             watermarked_image_1 = image + delta_w_1
             watermarked_image_1 = torch.clamp(watermarked_image_1, 0, 1)
 
             # Compute losses
             image = F.interpolate(original, size=(img_size, img_size), mode="bilinear", align_corners=False)
-            mask = F.interpolate(original_mask, size=(img_size, img_size), mode="nearest")
+            # mask = F.interpolate(original_mask, size=(img_size, img_size), mode="nearest")
             target_mask = F.interpolate(target_mask, size=(img_size, img_size), mode="bilinear", align_corners=False)
             # masked = F.interpolate(masked, size=(img_size, img_size), mode="bilinear", align_corners=False)
             # masked_1 = F.interpolate(masked_1, size=(img_size, img_size), mode="bilinear", align_corners=False)
@@ -312,7 +312,7 @@ class LocMark:
         rec_clean = (rec_clean + 1) / 2
 
         delta_p = rec_wm - rec_clean
-        delta_p = torch.clamp(delta_p, min=-self.args.epsilon, max=self.args.epsilon)
+        delta_p = delta_p.renorm(p=2, dim=0, maxnorm=self.args.epsilon)
         final_images = torch.clamp(rec_clean + 1.0 * delta_p, 0, 1)
         
         return final_images.detach(), delta_p.detach() # 512x512
