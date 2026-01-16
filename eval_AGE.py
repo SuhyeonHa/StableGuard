@@ -803,19 +803,19 @@ if __name__ == "__main__":
 
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
-    # save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    # generate_watermark_image(norm=c['normalization'],
-    #                          weight_path=c['weight_path'],
-    #                          target_model=c['target_model'],
-    #                          src_image_path=c['src_image_path'],
-    #                          save_path=c['save_path'],
-    #                          edit_model_name=c['edit_model_name'],
-    #                          num_bits=c['num_bits'],
-    #                          model_size=c['model_size'],
-    #                          eval_size=c['eval_size'],
-    #                          start_idx=c['start_idx'],
-    #                          end_idx=c['end_idx'],
-    #                          tamper_mode=c['tamper_mode'])
+    save_and_print_cfg = save_and_print_config(c, c['save_path'])
+    generate_watermark_image(norm=c['normalization'],
+                             weight_path=c['weight_path'],
+                             target_model=c['target_model'],
+                             src_image_path=c['src_image_path'],
+                             save_path=c['save_path'],
+                             edit_model_name=c['edit_model_name'],
+                             num_bits=c['num_bits'],
+                             model_size=c['model_size'],
+                             eval_size=c['eval_size'],
+                             start_idx=c['start_idx'],
+                             end_idx=c['end_idx'],
+                             tamper_mode=c['tamper_mode'])
 
     # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions    
     for setting in eval_setting:
@@ -833,5 +833,5 @@ if __name__ == "__main__":
         eva.run(f"{c['save_path']}/pred_mask_{setting}")
 
     # # 4) Evaluate fidelity between watermarked and original images
-    # eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'])
-    # eva_fid.run(f"{c['save_path']}/cover_images")
+    eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'])
+    eva_fid.run(f"{c['save_path']}/cover_images")

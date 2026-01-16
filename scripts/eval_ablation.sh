@@ -2,7 +2,10 @@
 #NOTE: check direction_vectors in locmark.py
 
 target_dirs=(
-    "ours_full/20260104-075451"
+    "ours_full/pgd-l2-20-255/20260115-113025"
+    "ours_full/pgd-l2-25-255/20260115-120417"
+    "ours_full/pgd-l2-30-255/20260115-113235"
+    "ours_full/pgd-l2-35-255/20260115-121555"
     # "ours_random_mean/20260104-080404"
     # "ours_random/20260104-080115"
     # "ours_ones/20260104-083833"
@@ -25,5 +28,5 @@ do
         eval_size=256 \
         start_idx=0 \
         end_idx=100 \
-        tamper_mode=zero_mask
+        tamper_mode=inpaint 
 done
