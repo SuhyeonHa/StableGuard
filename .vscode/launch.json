@@ -25,7 +25,7 @@
                 "CUDA_VISIBLE_DEVICES": "3"
             }
         },
-                {
+        {
             "name": "Eval AGE",
             "type": "debugpy",
             "request": "launch",
@@ -39,6 +39,22 @@
                 "target_model=omniguard",
                 "save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/all_512_eval_256",
                 "tamper_mode=zero_mask"
+            ]
+        },
+        {
+            "name": "Eval AGE on hdpaint",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "eval_AGE",       // running module
+            "cwd": "${workspaceFolder}",    // fixed working directory
+            "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "2"
+            },
+            "args": [
+                "target_model=ours",
+                "save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/ours_full/test",
+                "tamper_mode=hdpainter"
             ]
         }
     ]

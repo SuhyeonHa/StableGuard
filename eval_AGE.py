@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader
 from torchvision.utils import save_image
 from torchvision.transforms import transforms, ToTensor
 from piq import ssim, psnr, LPIPS
+import sys
 
 from evaluation import PixelF1, PixelAUC, PixelIOU, PixelAccuracy
 from dataset import age_collate_fn, AGEDataset
@@ -33,6 +34,13 @@ from locmark.locmark import LocMark
 from locmark.main import Params
 from omegaconf import OmegaConf
 from evaluation.augmentation import get_robustness_transform
+from diffusers import StableDiffusionControlNetInpaintPipeline, ControlNetModel, DDIMScheduler, StableDiffusionInpaintPipelineLegacy
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "HD-Painter"))
+
+from src import models
+from src.methods import rasg, sd, sr
+from src.utils import IImage, resize
 
 image_mean = torch.tensor([0.485, 0.456, 0.406])
 image_std = torch.tensor([0.229, 0.224, 0.225])
@@ -127,6 +135,54 @@ def convert_mask_to_rect(masks, scale_factor=1.0):
 
     return rect_masks
 
+def make_inpaint_condition(image, image_mask):
+    '''
+    Args:
+        image (torch.Tensor): Input image tensor. [0, 1] or [-1, 1]
+        image_mask (torch.Tensor): Binary mask tensor. [0, 1], manipulate: -1
+    '''
+    image = image.clone()
+    # Controlnet: bg [0, 1] and mask=-1
+    if image.min() < 0: # if input is in [-1, 1]->[0, 1]
+        image = (image + 1.0) / 2.0
+    mask_binary = image_mask > 0.5
+    image[mask_binary.expand_as(image)] = -1.0 # manipulate regions: -1
+    return image
+
+def get_inpainting_function(
+    model_id: str,
+    method: str,
+    negative_prompt: str = '',
+    positive_prompt: str = '',
+    num_steps: int = 50,
+    eta: float = 0.25,
+    guidance_scale: float = 7.5
+):
+    inp_model = models.load_inpainting_model(model_id, device='cuda', cache=True, cache_dir='/mnt/nas5/suhyeon/caches')
+    
+    if 'rasg' in method:
+        runner = rasg
+    else:
+        runner = sd
+    
+    def run(image: Image, mask: Image, prompt: str, seed: int = 1) -> Image:
+        inpainted_image = runner.run(
+            ddim=inp_model,
+            method=method,
+            prompt=prompt,
+            image=IImage(image),
+            mask=IImage(mask),
+            seed=seed,
+            eta=eta,
+            negative_prompt=negative_prompt,
+            positive_prompt=positive_prompt,
+            num_steps=num_steps,
+            guidance_scale=guidance_scale
+        ).pil()
+        w, h = image.size
+        inpainted_image = Image.fromarray(np.array(inpainted_image)[:h, :w])
+        return inpainted_image
+    return run
 
 class Evaluation(object):
     """
@@ -291,11 +347,15 @@ class Evaluation_Fidelity(object):
 
 
 @torch.no_grad()
-def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, num_bits=48, model_size=512, eval_size=256, start_idx=0, end_idx=None, tamper_mode='inpaint'):
+def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, seed, num_bits=48, model_size=512, eval_size=256, start_idx=0, end_idx=None, tamper_mode='inpaint'):
     # create output subdirectories
     res = []
-    if tamper_mode == 'inpaint':
-        res = ['cover_images', 'spliced_images', 'spliceless_images', 'gt', 'msgs']
+    if tamper_mode == 'ldm':
+        res = ['cover_images', 'ldm_spliced_images', 'ldm_spliceless_images', 'gt', 'msgs']
+    elif tamper_mode == 'controlnet':
+        res = ['control_spliced_images', 'control_spliceless_images']
+    elif tamper_mode == 'hdpainter':
+        res = ['hdpainter_spliced_images', 'hdpainter_spliceless_images']
     elif tamper_mode == 'zero_mask':
         res = ['zero_mask_images', 'zero_mask']
     elif tamper_mode == 'vae_regen':
@@ -304,8 +364,28 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         os.makedirs(os.path.join(save_path, '%s' % n), exist_ok=True)
 
     # load pretrained diffusion VAE (encoder/decoder)
-    original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suhyeon/caches/').to('cuda')
-    pipe = StableDiffusionInpaintPipeline.from_pretrained(edit_model_name, cache_dir='/mnt/nas5/suhyeon/caches/', safety_checker=None).to('cuda')
+    if tamper_mode == 'controlnet':
+        controlnet = ControlNetModel.from_pretrained(
+            "lllyasviel/control_v11p_sd15_inpaint", torch_dtype=torch.float16, cache_dir='/mnt/nas5/suhyeon/caches/', safety_checker=None
+        ).to('cuda')
+        pipe = StableDiffusionControlNetInpaintPipeline.from_pretrained(
+            "runwayml/stable-diffusion-v1-5", controlnet=controlnet, torch_dtype=torch.float16, cache_dir='/mnt/nas5/suhyeon/caches/', safety_checker=None
+        ).to('cuda')
+        pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
+    elif tamper_mode == 'hdpainter':
+        pipe = get_inpainting_function(
+            model_id='ds8_inp',
+            method='painta+rasg',
+            eta=0.1,
+            guidance_scale=7.5,
+            num_steps=50,
+            negative_prompt="text, bad anatomy, bad proportions, blurry, cropped, deformed, disfigured, duplicate, error, extra limbs, gross proportions, jpeg artifacts, long neck, low quality, lowres, malformed, morbid, mutated, mutilated, out of frame, ugly, worst quality",
+            positive_prompt="Full HD, 4K, high quality, high resolution"
+        )
+    else:
+        original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suhyeon/caches/').to('cuda')
+        pipe = StableDiffusionInpaintPipeline.from_pretrained(edit_model_name, cache_dir='/mnt/nas5/suhyeon/caches/', safety_checker=None).to('cuda')
+
     generator = torch.Generator().manual_seed(42)
 
     # load model
@@ -419,8 +499,9 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             cover_images = Image.open(os.path.join(cover_path, image_names[0])).convert("RGB").resize((model_size, model_size))
             cover_images = ToTensor()(cover_images).unsqueeze(0).cuda() # [0, 1]
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
-        
-        if tamper_mode == 'inpaint':
+
+        # tamper
+        if tamper_mode == 'ldm':
             # inpaint and splice in 512x512
             inpaint_input = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
             generated_images = pipe(prompt="", image=inpaint_input, mask_image=masks, generator=generator, num_inference_steps=50).images[0]
@@ -477,6 +558,155 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                 cover_image_pil.save(os.path.join(save_path, 'cover_images', save_file_name.replace("jpg", "png")))
                 spliced_image_pil.save(os.path.join(save_path, 'spliced_images', save_file_name.replace("jpg", "png")))
                 spliceless_image_pil.save(os.path.join(save_path, 'spliceless_images', save_file_name.replace("jpg", "png")))
+
+                # save ground-truth mask as image tensor and message vector as .pt file
+                save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+                # torch.save(msg, os.path.join(save_path, 'msgs', save_file_name.split(".")[0] + '.pt'))
+
+        elif tamper_mode == 'controlnet':
+            # inpaint and splice in 512x512
+            inpaint_input = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
+            inpaint_mask = F.interpolate(masks, size=(512, 512), mode="nearest")
+            control_image = make_inpaint_condition(inpaint_input, inpaint_mask)
+            generated_images = pipe(
+                "",
+                num_inference_steps=50,
+                generator=generator,
+                eta=1.0,
+                image=inpaint_input,
+                mask_image=inpaint_mask,
+                control_image=control_image,
+            ).images[0]
+
+            # pil to tensor, normalize to [-1,1], add batch dim
+            generated_images = ToTensor()(generated_images).cuda()
+            generated_images = (generated_images * 2.0 - 1.0).unsqueeze(0)
+
+            # composite at 512x512, then downsample to original size
+            spliced_images = inpaint_mask * generated_images + (1 - inpaint_mask) * inpaint_input # operation in [-1, 1]
+            spliceless_images = generated_images
+
+            # adjust to each model's training size
+            spliced_images = F.interpolate(spliced_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+            spliceless_images = F.interpolate(spliceless_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+            cover_images = F.interpolate(cover_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+
+            # save per-image outputs: cover, tamper, ground-truth mask, and message vector
+            for i in range(images.size(0)):
+                save_file_name = image_names[i]
+                cover_image = cover_images[i]
+                spliced_image = spliced_images[i]
+                spliceless_image = spliceless_images[i]
+                mask = masks[i]
+                # msg = msgs[i]
+
+                # make each a single-image tensor and convert to uint8 PIL before saving
+                cover_image = cover_image.unsqueeze(0)
+                spliced_image = spliced_image.unsqueeze(0)
+                spliceless_image = spliceless_image.unsqueeze(0)
+                mask = mask.unsqueeze(0)
+                # msg = msg.unsqueeze(0)
+
+                # cover image: convert from model range [-1,1] to [0,255] uint8
+                cover_image = (cover_image / 2 + 0.5).clamp(0, 1)
+                cover_image = cover_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                cover_image = (cover_image * 255).astype(np.uint8)
+                cover_image_pil = Image.fromarray(cover_image)
+
+                # spliced image: same conversion
+                spliced_image = (spliced_image / 2 + 0.5).clamp(0, 1)
+                spliced_image = spliced_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                spliced_image = (spliced_image * 255).astype(np.uint8)
+                spliced_image_pil = Image.fromarray(spliced_image)
+
+                # spliceless image: same conversion
+                spliceless_image = (spliceless_image / 2 + 0.5).clamp(0, 1)
+                spliceless_image = spliceless_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                spliceless_image = (spliceless_image * 255).astype(np.uint8)
+                spliceless_image_pil = Image.fromarray(spliceless_image)
+
+                # save cover and edited images as PNG (replace .jpg extension if present)
+                # cover_image_pil.save(os.path.join(save_path, 'cover_images', save_file_name.replace("jpg", "png")))
+                spliced_image_pil.save(os.path.join(save_path, 'control_spliced_images', save_file_name.replace("jpg", "png")))
+                spliceless_image_pil.save(os.path.join(save_path, 'control_spliceless_images', save_file_name.replace("jpg", "png")))
+
+                # save ground-truth mask as image tensor and message vector as .pt file
+                # save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+                # torch.save(msg, os.path.join(save_path, 'msgs', save_file_name.split(".")[0] + '.pt'))
+        
+        elif tamper_mode == 'hdpainter':
+            # inpaint and splice in 512x512
+            image_512 = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
+            mask_512 = F.interpolate(masks, size=(512, 512), mode='nearest')
+
+            # Image: [-1, 1] -> [0, 1] -> [0, 255] -> uint8 -> PIL -> IImage
+            inpaint_input = (image_512 / 2 + 0.5).clamp(0, 1)
+            inpaint_input = inpaint_input.squeeze(0).cpu().permute(1, 2, 0).numpy()
+            inpaint_input = Image.fromarray((inpaint_input*255).astype(np.uint8)).convert('RGB')
+            inpaint_input = IImage(inpaint_input)
+
+            inpaint_mask = mask_512.squeeze(0).cpu().permute(1, 2, 0).numpy()
+            inpaint_mask = Image.fromarray((inpaint_mask.squeeze() * 255).astype(np.uint8)).convert('RGB')
+            inpaint_mask = IImage(inpaint_mask)
+
+            with torch.enable_grad():
+                generated_iimage = pipe(
+                        inpaint_input, 
+                        inpaint_mask, 
+                        prompt="", 
+                        seed=seed
+                )
+
+            generated_images = ToTensor()(generated_iimage).cuda()
+            generated_images = (generated_images * 2.0 - 1.0).unsqueeze(0) # Scale to [-1, 1]
+
+            # composite at 512x512, then downsample to original size
+            spliced_images = mask_512 * generated_images + (1 - mask_512) * image_512 # operation in [-1, 1]
+            spliceless_images = generated_images
+
+            # adjust to each model's training size
+            spliced_images = F.interpolate(spliced_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+            spliceless_images = F.interpolate(spliceless_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+            cover_images = F.interpolate(cover_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+
+            # save per-image outputs: cover, tamper, ground-truth mask, and message vector
+            for i in range(images.size(0)):
+                save_file_name = image_names[i]
+                cover_image = cover_images[i]
+                spliced_image = spliced_images[i]
+                spliceless_image = spliceless_images[i]
+                mask = masks[i]
+                # msg = msgs[i]
+
+                # make each a single-image tensor and convert to uint8 PIL before saving
+                cover_image = cover_image.unsqueeze(0)
+                spliced_image = spliced_image.unsqueeze(0)
+                spliceless_image = spliceless_image.unsqueeze(0)
+                mask = mask.unsqueeze(0)
+                # msg = msg.unsqueeze(0)
+
+                # cover image: convert from model range [-1,1] to [0,255] uint8
+                cover_image = (cover_image / 2 + 0.5).clamp(0, 1)
+                cover_image = cover_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                cover_image = (cover_image * 255).astype(np.uint8)
+                cover_image_pil = Image.fromarray(cover_image)
+
+                # spliced image: same conversion
+                spliced_image = (spliced_image / 2 + 0.5).clamp(0, 1)
+                spliced_image = spliced_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                spliced_image = (spliced_image * 255).astype(np.uint8)
+                spliced_image_pil = Image.fromarray(spliced_image)
+
+                # spliceless image: same conversion
+                spliceless_image = (spliceless_image / 2 + 0.5).clamp(0, 1)
+                spliceless_image = spliceless_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                spliceless_image = (spliceless_image * 255).astype(np.uint8)
+                spliceless_image_pil = Image.fromarray(spliceless_image)
+
+                # save cover and edited images as PNG (replace .jpg extension if present)
+                # cover_image_pil.save(os.path.join(save_path, 'cover_images', save_file_name.replace("jpg", "png")))
+                spliced_image_pil.save(os.path.join(save_path, 'hdpainter_spliced_images', save_file_name.replace("jpg", "png")))
+                spliceless_image_pil.save(os.path.join(save_path, 'hdpainter_spliceless_images', save_file_name.replace("jpg", "png")))
 
                 # save ground-truth mask as image tensor and message vector as .pt file
                 save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
@@ -787,8 +1017,12 @@ if __name__ == "__main__":
 
     # evaluation settings based on tamper mode
     eval_setting = []
-    if c['tamper_mode'] == 'inpaint':
-        eval_setting = ["spliced", "spliceless"]
+    if c['tamper_mode'] == 'ldm':
+        eval_setting = ["ldm_spliced", "ldm_spliceless"]
+    elif c['tamper_mode'] == 'controlnet':
+        eval_setting = ["control_spliced", "control_spliceless"]
+    elif c['tamper_mode'] == 'hdpainter':
+        eval_setting = ["hdpainter_spliced", "hdpainter_spliceless"]
     elif c['tamper_mode'] == 'zero_mask':
         eval_setting = ["zero_mask"]
     elif c['tamper_mode'] == 'vae_regen':
@@ -810,6 +1044,7 @@ if __name__ == "__main__":
                              src_image_path=c['src_image_path'],
                              save_path=c['save_path'],
                              edit_model_name=c['edit_model_name'],
+                             seed=c['seed'],
                              num_bits=c['num_bits'],
                              model_size=c['model_size'],
                              eval_size=c['eval_size'],

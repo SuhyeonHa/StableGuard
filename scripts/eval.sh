@@ -35,13 +35,23 @@
 #     end_idx=100 \
 #     tamper_mode=cover
 
+# # ours
+# CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
+#     target_model=ours \
+#     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
+#     save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/ours/20251205-015055 \
+#     edit_model_name=sd-legacy/stable-diffusion-inpainting \
+#     eval_size=256 \
+#     start_idx=0 \
+#     end_idx=100 \
+#     tamper_mode=inpaint
+
 # ours
 CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
     target_model=ours \
     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
-    save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/ours/20251205-015055 \
-    edit_model_name=sd-legacy/stable-diffusion-inpainting \
+    save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/ours_full/test \
     eval_size=256 \
     start_idx=0 \
     end_idx=100 \
-    tamper_mode=inpaint
+    tamper_mode=hdpainter
