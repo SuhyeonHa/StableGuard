@@ -173,7 +173,7 @@ class LocMark:
 
             # projection
             delta_w = watermarked_image - image
-            delta_w = delta_w.renorm(p=2, dim=0, maxnorm=self.args.epsilon)
+            delta_w = delta_w.renorm(p=1, dim=0, maxnorm=self.args.epsilon)
             watermarked_image = image + delta_w
             watermarked_image = torch.clamp(watermarked_image, 0, 1)
 
@@ -203,7 +203,7 @@ class LocMark:
 
             # projection
             delta_w_1 = watermarked_image_1 - image
-            delta_w_1 = delta_w_1.renorm(p=2, dim=0, maxnorm=self.args.epsilon)
+            delta_w_1 = delta_w_1.renorm(p=1, dim=0, maxnorm=self.args.epsilon)
             watermarked_image_1 = image + delta_w_1
             watermarked_image_1 = torch.clamp(watermarked_image_1, 0, 1)
 
@@ -312,7 +312,7 @@ class LocMark:
         rec_clean = (rec_clean + 1) / 2
 
         delta_p = rec_wm - rec_clean
-        delta_p = delta_p.renorm(p=2, dim=0, maxnorm=self.args.epsilon)
+        delta_p = delta_p.renorm(p=1, dim=0, maxnorm=self.args.epsilon)
         final_images = torch.clamp(rec_clean + 1.0 * delta_p, 0, 1)
         
         return final_images.detach(), delta_p.detach() # 512x512
