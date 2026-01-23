@@ -556,8 +556,8 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
                 # save cover and edited images as PNG (replace .jpg extension if present)
                 cover_image_pil.save(os.path.join(save_path, 'cover_images', save_file_name.replace("jpg", "png")))
-                spliced_image_pil.save(os.path.join(save_path, 'spliced_images', save_file_name.replace("jpg", "png")))
-                spliceless_image_pil.save(os.path.join(save_path, 'spliceless_images', save_file_name.replace("jpg", "png")))
+                spliced_image_pil.save(os.path.join(save_path, 'ldm_spliced_images', save_file_name.replace("jpg", "png")))
+                spliceless_image_pil.save(os.path.join(save_path, 'ldm_spliceless_images', save_file_name.replace("jpg", "png")))
 
                 # save ground-truth mask as image tensor and message vector as .pt file
                 save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
