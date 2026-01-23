@@ -171,9 +171,12 @@ class LocMark:
             watermarked_image = self.pipe.vae.decode(perturbed_latent).sample
             watermarked_image = (watermarked_image + 1) / 2
 
-            # projection
+            # projection - L1 constraint per image
             delta_w = watermarked_image - image
-            delta_w = delta_w.renorm(p=1, dim=0, maxnorm=self.args.epsilon)
+            B = delta_w.shape[0]
+            l1_norms = delta_w.view(B, -1).abs().sum(dim=1, keepdim=True)
+            scale = torch.clamp(self.args.epsilon / (l1_norms + 1e-8), max=1.0)
+            delta_w = delta_w * scale.view(B, 1, 1, 1)
             watermarked_image = image + delta_w
             watermarked_image = torch.clamp(watermarked_image, 0, 1)
 
@@ -201,9 +204,11 @@ class LocMark:
             # watermarked_image_1 = self.pipe.vae.decode(perturbed_latent).sample
             # watermarked_image_1 = (watermarked_image_1 + 1) / 2
 
-            # projection
+            # projection - L1 constraint per image
             delta_w_1 = watermarked_image_1 - image
-            delta_w_1 = delta_w_1.renorm(p=1, dim=0, maxnorm=self.args.epsilon)
+            l1_norms_1 = delta_w_1.view(B, -1).abs().sum(dim=1, keepdim=True)
+            scale_1 = torch.clamp(self.args.epsilon / (l1_norms_1 + 1e-8), max=1.0)
+            delta_w_1 = delta_w_1 * scale_1.view(B, 1, 1, 1)
             watermarked_image_1 = image + delta_w_1
             watermarked_image_1 = torch.clamp(watermarked_image_1, 0, 1)
 
@@ -311,9 +316,13 @@ class LocMark:
         rec_clean = self.pipe.vae.decode(latent).sample
         rec_clean = (rec_clean + 1) / 2
 
+        # projection - L1 constraint per image
         delta_p = rec_wm - rec_clean
-        delta_p = delta_p.renorm(p=1, dim=0, maxnorm=self.args.epsilon)
-        final_images = torch.clamp(rec_clean + 1.0 * delta_p, 0, 1)
+        B = delta_p.shape[0]
+        l1_norms_p = delta_p.view(B, -1).abs().sum(dim=1, keepdim=True)
+        scale_p = torch.clamp(self.args.epsilon / (l1_norms_p + 1e-8), max=1.0)
+        delta_p = delta_p * scale_p.view(B, 1, 1, 1)
+        final_images = torch.clamp(rec_clean + delta_p, 0, 1)
         
         return final_images.detach(), delta_p.detach() # 512x512
         
