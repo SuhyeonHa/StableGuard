@@ -64,7 +64,7 @@ class Params:
         self.lambda_p = 0.1 #0.05 #0.025
         self.lambda_i = 0.05 #0.01 #0.005
         self.feat_layer = 1
-        self.epsilon = 0.1  # L∞ bound in latent space
+        self.epsilon = 0.3  # L∞ bound in latent space
 
         # --- Robustness Parameters --- 
         self.eps0_std = [0.0, 0.25] # Latent noise
