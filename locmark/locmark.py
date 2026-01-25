@@ -144,7 +144,7 @@ class LocMark:
         # Step 3: Initialize perturbation (trainable parameter)
         # delta_m = torch.zeros_like(latent_fft, requires_grad=True)
         delta_m = torch.zeros_like(latent, requires_grad=True)
-        optimizer = optim.Adam([delta_m], lr=self.args.lr)
+        # optimizer = optim.Adam([delta_m], lr=self.args.lr)
 
         # input = F.interpolate(original, size=(self.args.vae_image_size, self.args.vae_image_size), mode="bilinear", align_corners=False)
         # adaptive_weight = self._get_feature_weight(input, min_weight=0.3)
@@ -152,7 +152,8 @@ class LocMark:
         # Training loop
         for step in range(self.args.steps):
         # for step in tqdm(range(self.args.steps), desc="Embedding Watermark"):
-            optimizer.zero_grad()
+            # optimizer.zero_grad()
+            actual_step_size = self.args.lr - (self.args.lr - self.args.lr / 100) / self.args.steps * step
 
             original_mask = self._create_random_mask(image, num_masks=1, mask_percentage=self.args.mask_percentage)
             original_mask = original_mask.to(self.args.device)
@@ -172,14 +173,14 @@ class LocMark:
             watermarked_image = (watermarked_image + 1) / 2
 
             # projection - L1 constraint per image
-            delta_w = watermarked_image - image
-            B = delta_w.shape[0]
-            l1_norms = delta_w.view(B, -1).abs().sum(dim=1, keepdim=True)
-            # l2_norms = delta_w.view(B, -1).pow(2).sum(dim=1, keepdim=True).sqrt()
-            scale = torch.clamp(self.args.epsilon / (l1_norms + 1e-8), max=1.0)
-            delta_w = delta_w * scale.view(B, 1, 1, 1)
-            watermarked_image = image + delta_w
-            watermarked_image = torch.clamp(watermarked_image, 0, 1)
+            # delta_w = watermarked_image - image
+            # B = delta_w.shape[0]
+            # l1_norms = delta_w.view(B, -1).abs().sum(dim=1, keepdim=True)
+            # # l2_norms = delta_w.view(B, -1).pow(2).sum(dim=1, keepdim=True).sqrt()
+            # scale = torch.clamp(self.args.epsilon / (l1_norms + 1e-8), max=1.0)
+            # delta_w = delta_w * scale.view(B, 1, 1, 1)
+            # watermarked_image = image + delta_w
+            # watermarked_image = torch.clamp(watermarked_image, 0, 1)
 
             # masked = watermarked_image * mask + (1 - mask) * image
 
@@ -205,14 +206,14 @@ class LocMark:
             # watermarked_image_1 = self.pipe.vae.decode(perturbed_latent).sample
             # watermarked_image_1 = (watermarked_image_1 + 1) / 2
 
-            # projection - L1 constraint per image
-            delta_w_1 = watermarked_image_1 - image
-            l1_norms_1 = delta_w_1.view(B, -1).abs().sum(dim=1, keepdim=True)
-            # l2_norms_1 = delta_w_1.view(B, -1).pow(2).sum(dim=1, keepdim=True).sqrt()
-            scale_1 = torch.clamp(self.args.epsilon / (l1_norms_1 + 1e-8), max=1.0)
-            delta_w_1 = delta_w_1 * scale_1.view(B, 1, 1, 1)
-            watermarked_image_1 = image + delta_w_1
-            watermarked_image_1 = torch.clamp(watermarked_image_1, 0, 1)
+            # # projection - L1 constraint per image
+            # delta_w_1 = watermarked_image_1 - image
+            # l1_norms_1 = delta_w_1.view(B, -1).abs().sum(dim=1, keepdim=True)
+            # # l2_norms_1 = delta_w_1.view(B, -1).pow(2).sum(dim=1, keepdim=True).sqrt()
+            # scale_1 = torch.clamp(self.args.epsilon / (l1_norms_1 + 1e-8), max=1.0)
+            # delta_w_1 = delta_w_1 * scale_1.view(B, 1, 1, 1)
+            # watermarked_image_1 = image + delta_w_1
+            # watermarked_image_1 = torch.clamp(watermarked_image_1, 0, 1)
 
             # Compute losses
             image = F.interpolate(original, size=(img_size, img_size), mode="bilinear", align_corners=False)
@@ -300,7 +301,14 @@ class LocMark:
                                     #  0.2 * loss_d + 0.2 * loss_d1 + \
             
             total_loss.backward()
-            optimizer.step()
+            # optimizer.step()
+
+            # PGD
+            with torch.no_grad():
+                grad = delta_m.grad.detach()
+                delta_m.data = delta_m.data - grad.sign() * actual_step_size
+                delta_m.data = torch.clamp(delta_m.data, -self.args.epsilon, self.args.epsilon)
+            delta_m.grad.zero_()
 
             if step == 0 or (step+1) % 100 == 0:
                 psnr_val = self._compute_psnr(watermarked_image.detach(), image.detach())
@@ -310,24 +318,36 @@ class LocMark:
                 # print(f"Dice Loss: {loss_d.item():.4f}, Dice1 Loss: {loss_d1.item():.4f}")
                 print(f"PSNR Loss: {loss_psnr.item():.4f}, LPIPS Loss: {loss_lpips.item():.4f}")
 
-        # Final watermarked image
-        wm_latent = latent + delta_m
-        rec_wm = self.pipe.vae.decode(wm_latent).sample
-        rec_wm = (rec_wm + 1) / 2
+        with torch.no_grad():
+            final_latent = latent + delta_m
+            final_images = self.pipe.vae.decode(final_latent).sample
+            final_images = (final_images + 1) / 2
 
-        rec_clean = self.pipe.vae.decode(latent).sample
-        rec_clean = (rec_clean + 1) / 2
+            rec_clean = self.pipe.vae.decode(latent).sample
+            rec_clean = (rec_clean + 1) / 2
+
+            delta_p = final_images - rec_clean
+
+        return final_images.detach(), delta_p.detach()
+
+        # Final watermarked image
+        # wm_latent = latent + delta_m
+        # rec_wm = self.pipe.vae.decode(wm_latent).sample
+        # rec_wm = (rec_wm + 1) / 2
+
+        # rec_clean = self.pipe.vae.decode(latent).sample
+        # rec_clean = (rec_clean + 1) / 2
 
         # projection - L1 constraint per image
-        delta_p = rec_wm - rec_clean
-        B = delta_p.shape[0]
-        l1_norms_p = delta_p.view(B, -1).abs().sum(dim=1, keepdim=True)
-        # l2_norms_p = delta_p.view(B, -1).pow(2).sum(dim=1, keepdim=True).sqrt()
-        scale_p = torch.clamp(self.args.epsilon / (l1_norms_p + 1e-8), max=1.0)
-        delta_p = delta_p * scale_p.view(B, 1, 1, 1)
-        final_images = torch.clamp(rec_clean + delta_p, 0, 1)
+        # delta_p = rec_wm - rec_clean
+        # B = delta_p.shape[0]
+        # l1_norms_p = delta_p.view(B, -1).abs().sum(dim=1, keepdim=True)
+        # # l2_norms_p = delta_p.view(B, -1).pow(2).sum(dim=1, keepdim=True).sqrt()
+        # scale_p = torch.clamp(self.args.epsilon / (l1_norms_p + 1e-8), max=1.0)
+        # delta_p = delta_p * scale_p.view(B, 1, 1, 1)
+        # final_images = torch.clamp(rec_clean + delta_p, 0, 1)
         
-        return final_images.detach(), delta_p.detach() # 512x512
+        # return final_images.detach(), delta_p.detach() # 512x512
         
     def decode_watermark(self, watermarked_image: torch.Tensor) -> torch.Tensor:
         watermarked_image = watermarked_image.to(self.args.device)

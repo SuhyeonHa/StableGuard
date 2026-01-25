@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-locmark-pgd-l1-31500
+  name: suhyeon-train-locmark-pgd-linf-0.1
 spec:
   template:
     spec:
