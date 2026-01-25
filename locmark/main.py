@@ -28,7 +28,7 @@ class Params:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0034.png'
-        self.exp_name = 'pgd-linf-exp3' # NOTE: L∞ PGD with ε=0.1
+        self.exp_name = 'pgd-linf-exp4' # NOTE: L∞ PGD with ε=0.1
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
         self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours_full' # NOTE: multi image optimization, exp_name
         # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
@@ -59,12 +59,12 @@ class Params:
         self.target_cossim = 0.2
 
         # --- Optimization Parameters ---
-        self.lr = 0.03  # Step size for L∞ PGD (Option C: α ≈ 2.5×ε/T)
+        self.lr = 0.01  # Step size for L∞ PGD (Option C: α ≈ 2.5×ε/T)
         self.steps = 300
-        self.lambda_p = 0.001 #0.05 #0.025
-        self.lambda_i = 0.001 #0.01 #0.005
+        self.lambda_p = 0.01 #0.05 #0.025
+        self.lambda_i = 0.01 #0.01 #0.005
         self.feat_layer = 1
-        self.epsilon = 0.7  # L∞ bound in latent space
+        self.epsilon = 0.5  # L∞ bound in latent space
 
         # --- Robustness Parameters --- 
         self.eps0_std = [0.0, 0.25] # Latent noise
