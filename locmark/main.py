@@ -59,10 +59,10 @@ class Params:
         self.target_cossim = 0.2
 
         # --- Optimization Parameters ---
-        self.lr = 0.001  # Step size for L∞ PGD (Option C: α ≈ 2.5×ε/T)
+        self.lr = 0.01  # Step size for L∞ PGD (Option C: α ≈ 2.5×ε/T)
         self.steps = 300
-        self.lambda_p = 0.1 #0.05 #0.025
-        self.lambda_i = 0.05 #0.01 #0.005
+        self.lambda_p = 0.001 #0.05 #0.025
+        self.lambda_i = 0.001 #0.01 #0.005
         self.feat_layer = 1
         self.epsilon = 0.3  # L∞ bound in latent space
 
