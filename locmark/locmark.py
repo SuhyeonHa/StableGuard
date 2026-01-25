@@ -174,9 +174,9 @@ class LocMark:
             # projection - L1 constraint per image
             delta_w = watermarked_image - image
             B = delta_w.shape[0]
-            # l1_norms = delta_w.view(B, -1).abs().sum(dim=1, keepdim=True)
-            l2_norms = delta_w.view(B, -1).pow(2).sum(dim=1, keepdim=True).sqrt()
-            scale = torch.clamp(self.args.epsilon / (l2_norms + 1e-8), max=1.0)
+            l1_norms = delta_w.view(B, -1).abs().sum(dim=1, keepdim=True)
+            # l2_norms = delta_w.view(B, -1).pow(2).sum(dim=1, keepdim=True).sqrt()
+            scale = torch.clamp(self.args.epsilon / (l1_norms + 1e-8), max=1.0)
             delta_w = delta_w * scale.view(B, 1, 1, 1)
             watermarked_image = image + delta_w
             watermarked_image = torch.clamp(watermarked_image, 0, 1)
@@ -207,9 +207,9 @@ class LocMark:
 
             # projection - L1 constraint per image
             delta_w_1 = watermarked_image_1 - image
-            # l1_norms_1 = delta_w_1.view(B, -1).abs().sum(dim=1, keepdim=True)
-            l2_norms_1 = delta_w_1.view(B, -1).pow(2).sum(dim=1, keepdim=True).sqrt()
-            scale_1 = torch.clamp(self.args.epsilon / (l2_norms_1 + 1e-8), max=1.0)
+            l1_norms_1 = delta_w_1.view(B, -1).abs().sum(dim=1, keepdim=True)
+            # l2_norms_1 = delta_w_1.view(B, -1).pow(2).sum(dim=1, keepdim=True).sqrt()
+            scale_1 = torch.clamp(self.args.epsilon / (l1_norms_1 + 1e-8), max=1.0)
             delta_w_1 = delta_w_1 * scale_1.view(B, 1, 1, 1)
             watermarked_image_1 = image + delta_w_1
             watermarked_image_1 = torch.clamp(watermarked_image_1, 0, 1)
@@ -321,9 +321,9 @@ class LocMark:
         # projection - L1 constraint per image
         delta_p = rec_wm - rec_clean
         B = delta_p.shape[0]
-        # l1_norms_p = delta_p.view(B, -1).abs().sum(dim=1, keepdim=True)
-        l2_norms_p = delta_p.view(B, -1).pow(2).sum(dim=1, keepdim=True).sqrt()
-        scale_p = torch.clamp(self.args.epsilon / (l2_norms_p + 1e-8), max=1.0)
+        l1_norms_p = delta_p.view(B, -1).abs().sum(dim=1, keepdim=True)
+        # l2_norms_p = delta_p.view(B, -1).pow(2).sum(dim=1, keepdim=True).sqrt()
+        scale_p = torch.clamp(self.args.epsilon / (l1_norms_p + 1e-8), max=1.0)
         delta_p = delta_p * scale_p.view(B, 1, 1, 1)
         final_images = torch.clamp(rec_clean + delta_p, 0, 1)
         
