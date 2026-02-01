@@ -161,7 +161,7 @@ class LocMark:
             if random.random() < 0.5:
                 original_mask = 1 - original_mask
 
-            image = F.interpolate(original, size=(self.args.vae_image_size, self.args.vae_image_size), mode="bilinear", align_corners=False)
+            image_512 = F.interpolate(original, size=(self.args.vae_image_size, self.args.vae_image_size), mode="bilinear", align_corners=False)
             mask = F.interpolate(original_mask, size=(self.args.vae_image_size, self.args.vae_image_size), mode="nearest")
             
             # perturbed_fft = latent_fft + delta_m
@@ -173,6 +173,12 @@ class LocMark:
 
             # masked = watermarked_image * mask + (1 - mask) * image
 
+            # clamp
+            with torch.no_grad():
+                pixel_delta = watermarked_image - image_512
+                pixel_delta = torch.clamp(pixel_delta, -self.args.epsilon, self.args.epsilon)
+                watermarked_image.data = torch.clamp(image_512 + pixel_delta, 0, 1)
+
             # uniform noise
             latent_mask = F.interpolate(original_mask, size=(64, 64), mode="bilinear", align_corners=False)
             
@@ -183,6 +189,13 @@ class LocMark:
 
             watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
             watermarked_image_1 = (watermarked_image_1 + 1) / 2
+
+            # clamp
+            with torch.no_grad():
+                pixel_delta_1 = watermarked_image_1 - image_512
+                pixel_delta_1 = torch.clamp(pixel_delta_1, -self.args.epsilon, self.args.epsilon)
+                watermarked_image_1.data = torch.clamp(image_512 + pixel_delta_1, 0, 1)
+
             # masked_1 = (watermarked_image_1 + 1) / 2
             # masked_1 = masked_1 * mask + (1 - mask) * image
 
@@ -296,13 +309,9 @@ class LocMark:
             rec_wm = self.pipe.vae.decode(latent_wm).sample
             rec_wm = (rec_wm + 1) / 2
 
-            rec_clean = self.pipe.vae.decode(latent).sample
-            rec_clean = (rec_clean + 1) / 2
-
-            delta_p = rec_wm - rec_clean
-            projected = torch.clamp(delta_p, -self.args.epsilon, self.args.epsilon)
-            final_images = torch.clamp(rec_clean + projected, 0, 1) # TODO: check
-        return final_images.detach(), delta_p.detach() 
+            final_delta = torch.clamp(rec_wm - image_512, -self.args.epsilon, self.args.epsilon)
+            final_images = torch.clamp(image_512 + final_delta, 0, 1)
+        return final_images.detach(), final_delta.detach() 
         
     def decode_watermark(self, watermarked_image: torch.Tensor) -> torch.Tensor:
         watermarked_image = watermarked_image.to(self.args.device)
