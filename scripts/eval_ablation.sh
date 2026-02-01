@@ -12,11 +12,17 @@ target_dirs=(
     # "ours_ones/20260104-083833"
     # "ours_random_quan/20260104-080730"
 
-    "ours_full/pgd-l1-13500/20260119-063406"
-    "ours_full/pgd-l1-18000/20260119-051652"
-    "ours_full/pgd-l1-22500/20260119-051759"
-    "ours_full/pgd-l1-27000/20260119-051931"
-    "ours_full/pgd-l1-31500/20260119-052023"
+    # "ours_full/pgd-l1-13500/20260119-063406"
+    # "ours_full/pgd-l1-18000/20260119-051652"
+    # "ours_full/pgd-l1-22500/20260119-051759"
+    # "ours_full/pgd-l1-27000/20260119-051931"
+    # "ours_full/pgd-l1-31500/20260119-052023"
+
+    "ours_full/pgd-linf-1.0/20260125-074951"
+    "ours_full/pgd-linf-exp2/20260125-075817"
+    "ours_full/pgd-linf-exp3/20260125-080221"
+    "ours_full/pgd-linf-exp4/20260125-080502"
+    "ours_full/pgd-linf-exp5/20260125-101922"
 )
 
 base_prefix="/mnt/nas5/suhyeon/projects/eval_spliceless"
@@ -27,7 +33,7 @@ do
     
     echo "Processing save_path: $full_save_path"
     
-    CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
+    CUDA_VISIBLE_DEVICES=2 python eval_AGE.py \
         target_model=ours \
         src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
         save_path="$full_save_path" \
