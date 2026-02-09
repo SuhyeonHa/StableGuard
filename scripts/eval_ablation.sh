@@ -18,11 +18,12 @@ target_dirs=(
     # "ours_full/pgd-l1-27000/20260119-051931"
     # "ours_full/pgd-l1-31500/20260119-052023"
 
-    "ours_full/pgd-linf-1.0/20260125-074951"
-    "ours_full/pgd-linf-exp2/20260125-075817"
-    "ours_full/pgd-linf-exp3/20260125-080221"
-    "ours_full/pgd-linf-exp4/20260125-080502"
-    "ours_full/pgd-linf-exp5/20260125-101922"
+    "ours_full/clamp-8/20260201-123208"
+    # "ours_full/clamp-12/20260201-065353"
+    # "ours_full/clamp-16/20260201-065209"
+    # "ours_full/clamp-20/20260201-063324"
+    # "ours_full/clamp-24/20260201-064936"
+    # "ours_full/clamp-28/20260201-064337"
 )
 
 base_prefix="/mnt/nas5/suhyeon/projects/eval_spliceless"

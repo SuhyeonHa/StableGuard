@@ -6,6 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import torch
 from fg_bg_perlin import PerlinNoiseGenerator
+from skimage.metrics import structural_similarity as ssim_func
 
 # ==========================================
 # 2. Configuration
