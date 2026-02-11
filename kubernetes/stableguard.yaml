@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-locmark-clamp-8
+  name: suhyeon-train-locmark-baseline
 spec:
   template:
     spec:
