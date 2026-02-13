@@ -307,12 +307,12 @@ class LocMark:
             image = denorm_imagenet(image)
             watermarked_image = denorm_imagenet(watermarked_image)
 
-            loss_psnr = self._psnr_loss(watermarked_image, image)
-            loss_lpips = self._lpips_loss(watermarked_image, image)
+            # loss_psnr = self._psnr_loss(watermarked_image, image)
+            # loss_lpips = self._lpips_loss(watermarked_image, image)
 
-            total_loss = self.args.lambda_clean * loss_m + \
-                          self.args.lambda_p * loss_psnr + \
-                          self.args.lambda_i * loss_lpips
+            total_loss = self.args.lambda_clean * loss_m
+                        #   self.args.lambda_p * loss_psnr + \
+                        #   self.args.lambda_i * loss_lpips
             
             if is_noise:
                 total_loss += self.args.lambda_noisy * loss_m1
