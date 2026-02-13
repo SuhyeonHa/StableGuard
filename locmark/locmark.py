@@ -199,10 +199,10 @@ class LocMark:
                 watermarked_image = image_512 + self.args.jnd_alpha * jnd_hmap * (watermarked_image - image_512)
 
             # clamp
-            with torch.no_grad():
-                pixel_delta = watermarked_image - image_512
-                pixel_delta = torch.clamp(pixel_delta, -self.args.epsilon, self.args.epsilon)
-                watermarked_image.data = torch.clamp(image_512 + pixel_delta, 0, 1)
+            # with torch.no_grad():
+            #     pixel_delta = watermarked_image - image_512
+            #     pixel_delta = torch.clamp(pixel_delta, -self.args.epsilon, self.args.epsilon)
+            #     watermarked_image.data = torch.clamp(image_512 + pixel_delta, 0, 1)
 
             # Patch noise injection
             if is_noise:
@@ -218,10 +218,10 @@ class LocMark:
                 watermarked_image_1 = (watermarked_image_1 + 1) / 2
 
                 # clamp
-                with torch.no_grad():
-                    pixel_delta_1 = watermarked_image_1 - image_512
-                    pixel_delta_1 = torch.clamp(pixel_delta_1, -self.args.epsilon, self.args.epsilon)
-                    watermarked_image_1.data = torch.clamp(image_512 + pixel_delta_1, 0, 1)
+                # with torch.no_grad():
+                #     pixel_delta_1 = watermarked_image_1 - image_512
+                #     pixel_delta_1 = torch.clamp(pixel_delta_1, -self.args.epsilon, self.args.epsilon)
+                #     watermarked_image_1.data = torch.clamp(image_512 + pixel_delta_1, 0, 1)
 
             # Compute losses
             image = F.interpolate(original, size=(img_size, img_size), mode="bilinear", align_corners=False)
@@ -347,7 +347,9 @@ class LocMark:
             if use_jnd:
                 rec_wm = image_512 + self.args.jnd_alpha * jnd_hmap * (rec_wm - image_512)
 
-            final_delta = torch.clamp(rec_wm - image_512, -self.args.epsilon, self.args.epsilon)
+            # final_delta = torch.clamp(rec_wm - image_512, -self.args.epsilon, self.args.epsilon)
+            # final_images = torch.clamp(image_512 + final_delta, 0, 1)
+            final_delta = rec_wm - image_512
             final_images = torch.clamp(image_512 + final_delta, 0, 1)
         return final_images.detach(), final_delta.detach()
         

@@ -66,7 +66,7 @@ class Params:
         self.lambda_clean = 1.0
         self.lambda_noisy = 1.0
         self.feat_layer = 1
-        self.epsilon = 16/255
+        self.epsilon = None
 
         # --- JND (Just Noticeable Difference) Parameters ---
         self.use_jnd = True  # Enable JND-based perceptual masking
