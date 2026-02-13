@@ -18,9 +18,9 @@ target_dirs=(
     # "ours_full/pgd-l1-27000/20260119-051931"
     # "ours_full/pgd-l1-31500/20260119-052023"
 
-    "ours_full/clamp-8/20260201-123208"
+    # "ours_full/clamp-8/20260201-123208"
     # "ours_full/clamp-12/20260201-065353"
-    # "ours_full/clamp-16/20260201-065209"
+    "ours_full/clamp-16/20260201-065209"
     # "ours_full/clamp-20/20260201-063324"
     # "ours_full/clamp-24/20260201-064936"
     # "ours_full/clamp-28/20260201-064337"
@@ -42,5 +42,5 @@ do
         eval_size=256 \
         start_idx=0 \
         end_idx=100 \
-        tamper_mode=ldm 
+        tamper_mode=zero_mask
 done

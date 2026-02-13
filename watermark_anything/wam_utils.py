@@ -15,12 +15,13 @@ def msg2str(msg):
 def str2msg(str):
     return [True if el=='1' else False for el in str]
 
-def load_model_from_checkpoint(weight_path, num_bits):
+def load_model_from_checkpoint(weight_path, num_bits, scaling_w=None):
     """
     Load a model from a checkpoint file and a JSON file containing the parameters.
     Args:
-    - json_path (str): the path to the JSON file containing the parameters
-    - ckpt_path (str): the path to the checkpoint file
+    - weight_path (str): the path to the weight directory
+    - num_bits (int): number of bits for the watermark
+    - scaling_w (float, optional): override scaling_w from params.json if provided
     """
     json_path = os.path.join(weight_path, "params.json")
     ckpt_path = os.path.join(weight_path, "wam_coco.pth")
@@ -51,14 +52,16 @@ def load_model_from_checkpoint(weight_path, num_bits):
     except:
         attenuation = None
     
-    # Build the complete model
-    wam = Wam(embedder, extractor, augmenter, attenuation, args.scaling_w, args.scaling_i)
+    # Build the complete model (use override scaling_w if provided)
+    final_scaling_w = scaling_w if scaling_w is not None else args.scaling_w
+    wam = Wam(embedder, extractor, augmenter, attenuation, final_scaling_w, args.scaling_i)
     
     # Load the model weights
     if os.path.exists(ckpt_path):
         checkpoint = torch.load(ckpt_path, map_location='cpu')
         wam.load_state_dict(checkpoint)
         print("Model loaded successfully from", ckpt_path)
+        print(f"scaling_w: {final_scaling_w} (override: {scaling_w is not None})")
         print(params)
     else:
         print("Checkpoint path does not exist:", ckpt_path)

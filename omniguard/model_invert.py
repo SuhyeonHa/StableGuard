@@ -159,7 +159,7 @@ class Model(nn.Module):
         
         return stego
 
-    def forward(self, cover_input, secret_input=None, watermarkID=None, rev=False):
+    def forward(self, cover_input, secret_input=None, watermarkID=None, rev=False, wm_strength=1.0):
 
         if not rev:
             concat = torch.cat((secret_input, cover_input), 1)
@@ -170,13 +170,13 @@ class Model(nn.Module):
             output_z = output.narrow(1, 4 * 3, output.shape[1] - 4 * 3)
             out = iwt(output_steg)
             out_temp = out
-            
+
             # added to match with model bit length
             model_bit_length = 100
 
             padding_needed = model_bit_length - watermarkID.shape[1]
             watermarks = F.pad(watermarkID, (0, padding_needed), "constant", 0)
-            out = self.encode(self.bm, out.to(device), watermarks)
+            out = self.encode(self.bm, out.to(device), watermarks, WM_STRENGTH=wm_strength)
 
             return out, output_z, out_temp, secret_temp
 

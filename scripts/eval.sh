@@ -4,36 +4,36 @@
 # CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
 #     target_model=wam \
 #     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
-#     save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/wam/256_valAGE_sd_1.2_wm_wofilter \
+#     save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/wam/concept_fig \
 #     edit_model_name=sd-legacy/stable-diffusion-inpainting \
 #     eval_size=256 \
 #     start_idx=0 \
 #     end_idx=100 \
-#     tamper_mode=inpaint \
-#     aug_type=blur \
-#     aug_param=15
+#     tamper_mode=hdpainter \
+#     wm_strength=4.0
 
 # omniguard
 # CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
 #     target_model=omniguard \
 #     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
-#     save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/all_512_eval_256 \
+#     save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/concept_fig_2.0 \
 #     edit_model_name=sd-legacy/stable-diffusion-inpainting \
 #     eval_size=256 \
 #     start_idx=0 \
 #     end_idx=100 \
-#     tamper_mode=cover
+#     tamper_mode=ldm \
+#     wm_strength=2.0
 
 # stableguard
-# CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
-#     target_model=stableguard \
-#     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
-#     save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/stableguard/256_valAGE_sd_1.2_wm_wofilter \
-#     edit_model_name=sd-legacy/stable-diffusion-inpainting \
-#     eval_size=256 \
-#     start_idx=0 \
-#     end_idx=100 \
-#     tamper_mode=cover
+CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
+    target_model=stableguard \
+    src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
+    save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/stableguard/256_valAGE_sd_1.2_wm_wofilter \
+    edit_model_name=sd-legacy/stable-diffusion-inpainting \
+    eval_size=256 \
+    start_idx=0 \
+    end_idx=100 \
+    tamper_mode=zero_mask
 
 # # ours
 # CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
@@ -47,11 +47,11 @@
 #     tamper_mode=inpaint
 
 # ours
-CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
-    target_model=ours \
-    src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
-    save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/ours_full/test \
-    eval_size=256 \
-    start_idx=0 \
-    end_idx=100 \
-    tamper_mode=hdpainter
+# CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
+#     target_model=ours \
+#     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
+#     save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/ours_full/test \
+#     eval_size=256 \
+#     start_idx=0 \
+#     end_idx=100 \
+#     tamper_mode=hdpainter

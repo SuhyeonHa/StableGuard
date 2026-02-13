@@ -156,9 +156,10 @@ def get_inpainting_function(
     positive_prompt: str = '',
     num_steps: int = 50,
     eta: float = 0.25,
-    guidance_scale: float = 7.5
+    guidance_scale: float = 7.5,
+    cache_dir: str = None
 ):
-    inp_model = models.load_inpainting_model(model_id, device='cuda', cache=True, cache_dir='/mnt/nas5/suhyeon/caches')
+    inp_model = models.load_inpainting_model(model_id, device='cuda', cache=True, cache_dir=cache_dir)
     
     if 'rasg' in method:
         runner = rasg
@@ -208,7 +209,7 @@ class Evaluation(object):
         self.iou = PixelIOU()
         self.acc = PixelAccuracy()
 
-    def run(self, save_path):
+    def run(self, save_path, tamper_mode):
         """
         Iterate over predicted masks found in self.pred_path, load the corresponding ground-truth,
         compute per-file pixel metrics, accumulate them, print a summary and append to a record file.
@@ -230,7 +231,11 @@ class Evaluation(object):
             try:
                 # open predicted mask and corresponding ground-truth mask as grayscale
                 pred_image = Image.open(os.path.join(self.pred_path, pred_image_path)).convert("L")
-                gt_image = Image.open(os.path.join(self.gt_path, pred_image_path)).convert("L")
+
+                if tamper_mode == 'zero_mask':
+                    gt_image = Image.new("L", pred_image.size, color=256)
+                else:
+                    gt_image = Image.open(os.path.join(self.gt_path, pred_image_path)).convert("L")
 
                 pred_image = pred_image.resize((self.eval_size, self.eval_size))
                 gt_image = gt_image.resize((self.eval_size, self.eval_size))
@@ -347,7 +352,7 @@ class Evaluation_Fidelity(object):
 
 
 @torch.no_grad()
-def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, seed, num_bits=48, model_size=512, eval_size=256, start_idx=0, end_idx=None, tamper_mode='inpaint'):
+def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, seed, num_bits=48, model_size=512, eval_size=256, start_idx=0, end_idx=None, tamper_mode='inpaint', wm_strength=None):
     # create output subdirectories
     res = []
     if tamper_mode == 'ldm':
@@ -380,7 +385,8 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             guidance_scale=7.5,
             num_steps=50,
             negative_prompt="text, bad anatomy, bad proportions, blurry, cropped, deformed, disfigured, duplicate, error, extra limbs, gross proportions, jpeg artifacts, long neck, low quality, lowres, malformed, morbid, mutated, mutilated, out of frame, ugly, worst quality",
-            positive_prompt="Full HD, 4K, high quality, high resolution"
+            positive_prompt="Full HD, 4K, high quality, high resolution",
+            cache_dir='/mnt/nas5/suhyeon/caches/'
         )
     else:
         original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suhyeon/caches/').to('cuda')
@@ -402,7 +408,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         mpw_vae_decoder.eval()
 
     elif target_model == "wam":
-        wam = load_model_from_checkpoint(weight_path, num_bits).cuda().eval()
+        wam = load_model_from_checkpoint(weight_path, num_bits, scaling_w=wm_strength).cuda().eval()
 
     elif target_model == "omniguard":
         net = Model(checkpoint=weight_path).cuda().eval()
@@ -410,6 +416,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         state_dicts = torch.load(os.path.join(weight_path, "model_checkpoint_01500.pt"), map_location="cpu", weights_only=False)
         network_state_dict = {k.removeprefix('module.'):v for k,v in state_dicts['net'].items()}
         net.load_state_dict(network_state_dict)
+        print(f"OmniGuard wm_strength: {wm_strength}")
 
     # prepare dataloader for validation images
     val_dataset = AGEDataset(data_root=src_image_path, norm_type=norm, mode="val", size=eval_size)
@@ -487,7 +494,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             secret_input = dwt(secret_input) # [1, 12, 256, 256]
             msgs = torch.randint(2, (1, 64)).to(torch.float32).cuda()
 
-            cover_images, output_z, out_temp, secret_temp = net(cover_input, secret_input, msgs)
+            cover_images, output_z, out_temp, secret_temp = net(cover_input, secret_input, msgs, wm_strength=wm_strength if wm_strength is not None else 1.0)
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
 
             # cover_images = F.interpolate(cover_images, size=(size, size), mode="bilinear", align_corners=False)
@@ -763,7 +770,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
 
 @torch.no_grad()
-def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num_bits=48, model_size=512, end_idx=None, aug_type=None, aug_param=None):
+def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num_bits=48, model_size=512, end_idx=None, aug_type=None, aug_param=None, wm_strength=None):
     if aug_type is not None and aug_param is not None:
         exp_suffix = f"{eval_setting}_{aug_type}_{aug_param}"
     else:
@@ -785,7 +792,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
         moe_gfn = moe_gfn.cuda()
         moe_gfn.eval()
     elif target_model == "wam":
-        wam = load_model_from_checkpoint(weight_path, num_bits).cuda().eval()
+        wam = load_model_from_checkpoint(weight_path, num_bits, scaling_w=wm_strength).cuda().eval()
     elif target_model == "omniguard":
         net = Model(checkpoint=weight_path).cuda().eval()
         init_model(net)
@@ -866,8 +873,8 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             pred_message = msg_predict_inference(pred_bit, pred_mask).cpu().float()  # [1, 32]
             
             # WAM predicts the watermarked region
-            save_image(denorm_imagenet(image), os.path.join(save_path, f"augmented_image_{exp_suffix}", image_path), normalize=False, scale_each=False)
-            save_image(pred_mask, os.path.join(save_path, f"pred_mask_{exp_suffix}", image_path), normalize=False, scale_each=True)
+            # save_image(denorm_imagenet(image), os.path.join(save_path, f"augmented_image_{exp_suffix}", image_path), normalize=False, scale_each=False)
+            save_image(pred_mask, os.path.join(save_path, f"pred_bin_mask_{exp_suffix}", image_path), normalize=False, scale_each=True)
 
             # load ground-truth message that was saved earlier during generation step
             # save_msgs = torch.load(os.path.join(save_path, 'msgs', image_path.split('.')[0] + '.pt'))
@@ -910,7 +917,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             pred_mask = F.interpolate(pred_mask, size=(model_size, model_size), mode="bilinear", align_corners=False)
 
             # save predicted mask image to disk
-            save_image(1-pred_mask, os.path.join(save_path, f"pred_mask_{exp_suffix}", image_path), normalize=False, scale_each=True)
+            save_image(1-pred_mask, os.path.join(save_path, f"pred_bin_mask_{exp_suffix}", image_path), normalize=False, scale_each=True)
 
             # load ground-truth message that was saved earlier during generation step
             # 64 bits (training) + zero-padding
@@ -1014,6 +1021,7 @@ if __name__ == "__main__":
     c['normalization'] = c['normalization'][model_name]
     c['num_bits'] = c['num_bits'][model_name]
     c['model_size'] = c['train_img_size'][model_name]
+    c['wm_strength'] = c.get('wm_strength', None)  # WAM/OmniGuard watermark strength
 
     # evaluation settings based on tamper mode
     eval_setting = []
@@ -1050,9 +1058,10 @@ if __name__ == "__main__":
                              eval_size=c['eval_size'],
                              start_idx=c['start_idx'],
                              end_idx=c['end_idx'],
-                             tamper_mode=c['tamper_mode'])
+                             tamper_mode=c['tamper_mode'],
+                             wm_strength=c['wm_strength'])
 
-    # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions    
+    # # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions    
     for setting in eval_setting:
         generate_tamper_mask(weight_path=c['weight_path'],
                             eval_setting=setting,
@@ -1062,10 +1071,14 @@ if __name__ == "__main__":
                             model_size=c['model_size'],
                             end_idx=c['end_idx'],
                             aug_type=c['aug_type'],
-                            aug_param=c['aug_param'])
+                            aug_param=c['aug_param'],
+                            wm_strength=c['wm_strength'])
         # 3) Evaluate predicted masks against ground-truth masks saved in disk
         eva = Evaluation(f"{c['save_path']}/pred_bin_mask_{setting}", f"{c['save_path']}/gt", eval_size=c['eval_size'])
-        eva.run(f"{c['save_path']}/pred_mask_{setting}")
+        if c['target_model'] == 'ours':
+            eva.run(f"{c['save_path']}/pred_mask_{setting}", tampermode=c['tamper_mode'])
+        else:
+            eva.run(f"{c['save_path']}/pred_bin_mask_{setting}", tamper_mode=c['tamper_mode'])
 
     # # 4) Evaluate fidelity between watermarked and original images
     eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'])

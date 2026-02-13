@@ -33,3 +33,7 @@ train_img_size:
   wam: 256
   stableguard: 256
   ours: 256
+
+# Watermark strength (shared across models)
+# WAM default: 2.0, OmniGuard default: 1.0
+wm_strength: 1.0
