@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-locmark-hard-noise-jnd
+  name: suhyeon-train-locmark-hard-noise-jnd-2.0
 spec:
   template:
     spec:
