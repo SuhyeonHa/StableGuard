@@ -9,6 +9,7 @@ import torch.optim as optim
 import numpy as np
 import lpips
 from .helper import load_images_from_path, norm_imagenet, denorm_imagenet
+from watermark_anything.modules.jnd import JND
 
 epsilon = 1e-6
 
@@ -50,6 +51,10 @@ class LocMark:
 
         self.loss_fn_vgg = lpips.LPIPS(net='alex').to(self.args.device)
         self.loss_fn_vgg.eval()
+
+        if getattr(self.args, 'use_jnd', False):
+            self.jnd = JND(in_channels=1, out_channels=3, blue=True).to(self.args.device)
+            self.jnd.eval()
 
     def generate_universal_vectors(self, feature_dim):
         """
@@ -160,6 +165,13 @@ class LocMark:
         # input = F.interpolate(original, size=(self.args.vae_image_size, self.args.vae_image_size), mode="bilinear", align_corners=False)
         # adaptive_weight = self._get_feature_weight(input, min_weight=0.3)
 
+        # Pre-compute JND heatmap (fixed per image since original doesn't change)
+        use_jnd = getattr(self.args, 'use_jnd', False)
+        if use_jnd:
+            with torch.no_grad():
+                jnd_hmap = self.jnd.heatmaps(image)  # [B, 3, H, W], in [0,1] scale
+            print(f"[JND] alpha={self.args.jnd_alpha}, heatmap range=[{jnd_hmap.min():.4f}, {jnd_hmap.max():.4f}]")
+
         # Training loop
         for step in range(self.args.steps):
         # for step in tqdm(range(self.args.steps), desc="Embedding Watermark"):
@@ -182,7 +194,9 @@ class LocMark:
             watermarked_image = self.pipe.vae.decode(perturbed_latent).sample
             watermarked_image = (watermarked_image + 1) / 2
 
-            # masked = watermarked_image * mask + (1 - mask) * image
+            # JND modulation: imgs_w = imgs + alpha * hmaps * (imgs_w - imgs)
+            if use_jnd:
+                watermarked_image = image_512 + self.args.jnd_alpha * jnd_hmap * (watermarked_image - image_512)
 
             # clamp
             with torch.no_grad():
@@ -330,9 +344,12 @@ class LocMark:
             rec_wm = self.pipe.vae.decode(latent_wm).sample
             rec_wm = (rec_wm + 1) / 2
 
+            if use_jnd:
+                rec_wm = image_512 + self.args.jnd_alpha * jnd_hmap * (rec_wm - image_512)
+
             final_delta = torch.clamp(rec_wm - image_512, -self.args.epsilon, self.args.epsilon)
             final_images = torch.clamp(image_512 + final_delta, 0, 1)
-        return final_images.detach(), final_delta.detach() 
+        return final_images.detach(), final_delta.detach()
         
     def decode_watermark(self, watermarked_image: torch.Tensor) -> torch.Tensor:
         watermarked_image = watermarked_image.to(self.args.device)
