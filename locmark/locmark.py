@@ -337,7 +337,7 @@ class LocMark:
                 if is_hard and is_noise:
                     print(f"Hard Neg1 Loss: {loss_h1.item():.4f}")
                 # print(f"Dice Loss: {loss_d.item():.4f}, Dice1 Loss: {loss_d1.item():.4f}")
-                print(f"PSNR Loss: {loss_psnr.item():.4f}, LPIPS Loss: {loss_lpips.item():.4f}")
+                # print(f"PSNR Loss: {loss_psnr.item():.4f}, LPIPS Loss: {loss_lpips.item():.4f}")
 
         with torch.no_grad():
             latent_wm = latent + delta_m
