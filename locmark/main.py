@@ -61,8 +61,8 @@ class Params:
         # --- Optimization Parameters ---
         self.lr = 2.0
         self.steps = 300
-        self.lambda_p = 0.1 #0.1 #0.05 #0.025
-        self.lambda_i = 0.05 #0.05 #0.01 #0.005
+        self.lambda_p = 0.025 #0.1 #0.05 #0.025
+        self.lambda_i = 0.005 #0.05 #0.01 #0.005
         self.lambda_clean = 1.0
         self.lambda_noisy = 1.0
         self.feat_layer = 1
