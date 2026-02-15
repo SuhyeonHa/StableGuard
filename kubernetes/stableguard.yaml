@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-locmark-wam-0.4-hard
+  name: suhyeon-train-locmark-wam-0.4-hinge
 spec:
   template:
     spec:
