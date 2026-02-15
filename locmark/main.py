@@ -70,7 +70,7 @@ class Params:
 
         # --- JND (Just Noticeable Difference) Parameters ---
         self.use_jnd = True  # Enable JND-based perceptual masking
-        self.jnd_alpha = 0.2 # JND modulation strength (higher = stronger watermark)
+        self.jnd_alpha = 0.4 # JND modulation strength (higher = stronger watermark)
 
         # --- WAM Pretrained Encoder Parameters ---
         self.wam_weight_path = '/mnt/nas5/suhyeon/checkpoints/wam/'
