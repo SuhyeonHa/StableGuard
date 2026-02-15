@@ -20,10 +20,12 @@ target_dirs=(
 
     # "ours_full/clamp-8/20260201-123208"
     # "ours_full/clamp-12/20260201-065353"
-    "ours_full/clamp-16/20260201-065209"
+    # "ours_full/clamp-16/20260201-065209"
     # "ours_full/clamp-20/20260201-063324"
     # "ours_full/clamp-24/20260201-064936"
     # "ours_full/clamp-28/20260201-064337"
+
+    "ours_wam/baseline-hinge/20260215-215311"
 )
 
 base_prefix="/mnt/nas5/suhyeon/projects/eval_spliceless"

@@ -1,7 +1,6 @@
 import os
 import torch
 from diffusers import StableDiffusionInpaintPipeline
-import timm
 import torch.nn.functional as F
 import random
 from tqdm import tqdm
@@ -10,6 +9,7 @@ import numpy as np
 import lpips
 from .helper import load_images_from_path, norm_imagenet, denorm_imagenet
 from watermark_anything.modules.jnd import JND
+from watermark_anything.wam_utils import load_model_from_checkpoint
 
 epsilon = 1e-6
 
@@ -23,17 +23,13 @@ class LocMark:
             # torch_dtype=torch.float16,
             cache_dir='/mnt/nas5/suhyeon/caches'
         ).to(self.args.device)
-        self.image_encoder = timm.create_model(
-            'convnext_small.dinov3_lvd1689m',
-            pretrained=True,
-            features_only=True
-        ).to(self.args.device)
-        # self.feature_upsampler = torch.hub.load('wimmerth/anyup', 'anyup_multi_backbone', use_natten=True).to(self.args.device)
+        # Load WAM pretrained model and extract the image encoder (ViT backbone)
+        wam = load_model_from_checkpoint(self.args.wam_weight_path, self.args.wam_num_bits)
+        self.image_encoder = wam.detector.image_encoder.to(self.args.device)
+        del wam  # free memory
 
         for param in self.image_encoder.parameters():
             param.requires_grad = False
-        # for param in self.feature_upsampler.parameters():
-        #     param.requires_grad = False
 
         self.pipe.vae.requires_grad_(False)
         self.pipe.unet.requires_grad_(False)
@@ -46,8 +42,8 @@ class LocMark:
         # self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/random_vec_univ_{self.args.feature_dim}.pt').to(self.args.device)
         self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt').to(self.args.device)
         # self.direction_vectors = self.generate_universal_vectors(self.args.feature_dim)
-        # torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_ones_{self.args.feature_dim}.pt')
-        self.num_patches = (self.args.image_size // 14) ** 2
+        # torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt')
+        self.num_patches = (self.args.image_size // 16) ** 2
 
         self.loss_fn_vgg = lpips.LPIPS(net='alex').to(self.args.device)
         self.loss_fn_vgg.eval()
@@ -238,7 +234,7 @@ class LocMark:
             # masked = norm_imagenet(masked)
             # masked_1 = norm_imagenet(masked_1)
 
-            features = self.image_encoder(image)[self.args.feat_layer]
+            features = self.image_encoder(image)
             # features = self.feature_upsampler(image, features, q_chunk_size=3)
             B, C, H, W = features.shape # [1, 192, 32, 32]
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
@@ -251,7 +247,7 @@ class LocMark:
                 
             noise_floor = torch.max(base_cos_sim)
 
-            features = self.image_encoder(watermarked_image)[self.args.feat_layer]
+            features = self.image_encoder(watermarked_image)
             # features = self.feature_upsampler(watermarked_image, features, q_chunk_size=3)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
@@ -265,7 +261,7 @@ class LocMark:
                 watermarked_image_1 = F.interpolate(watermarked_image_1, size=(img_size, img_size), mode="bilinear", align_corners=False)
                 watermarked_image_1 = norm_imagenet(watermarked_image_1)
 
-                features = self.image_encoder(watermarked_image_1)[self.args.feat_layer]
+                features = self.image_encoder(watermarked_image_1)
                 # features = self.feature_upsampler(watermarked_image_1, features, q_chunk_size=3)
                 features = features.permute(0, 2, 3, 1).view(B, H * W, C)
                 features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
@@ -359,7 +355,7 @@ class LocMark:
         
         with torch.no_grad():
             watermarked_image = norm_imagenet(watermarked_image) 
-            features = self.image_encoder(watermarked_image)[self.args.feat_layer]
+            features = self.image_encoder(watermarked_image)
             features = smoother(features)
             # features = self.feature_upsampler(watermarked_image, features, q_chunk_size=3)
             B, C, H, W = features.shape

@@ -1076,7 +1076,7 @@ if __name__ == "__main__":
         # 3) Evaluate predicted masks against ground-truth masks saved in disk
         eva = Evaluation(f"{c['save_path']}/pred_bin_mask_{setting}", f"{c['save_path']}/gt", eval_size=c['eval_size'])
         if c['target_model'] == 'ours':
-            eva.run(f"{c['save_path']}/pred_mask_{setting}", tampermode=c['tamper_mode'])
+            eva.run(f"{c['save_path']}/pred_mask_{setting}", tamper_mode=c['tamper_mode'])
         else:
             eva.run(f"{c['save_path']}/pred_bin_mask_{setting}", tamper_mode=c['tamper_mode'])
 

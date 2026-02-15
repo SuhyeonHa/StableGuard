@@ -28,9 +28,9 @@ class Params:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0034.png'
-        self.exp_name = 'hard-noise-jnd-1.5'
+        self.exp_name = 'baseline-0.6'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
-        self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours_jnd' # NOTE: multi image optimization, exp_name
+        self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours_wam' # NOTE: multi image optimization, exp_name
         # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
         self.single_image_mode = False # NOTE
         self.num_test_images = 100 # the first n images
@@ -56,7 +56,7 @@ class Params:
         self.num_inference_steps = 100
         self.guidance_scale = 7.5
         self.temperature = 5.0
-        self.target_cossim = 0.2
+        self.target_cossim = 0.1
 
         # --- Optimization Parameters ---
         self.lr = 2.0
@@ -70,34 +70,21 @@ class Params:
 
         # --- JND (Just Noticeable Difference) Parameters ---
         self.use_jnd = True  # Enable JND-based perceptual masking
-        self.jnd_alpha = 1.5  # JND modulation strength (higher = stronger watermark)
+        self.jnd_alpha = 0.6 # JND modulation strength (higher = stronger watermark)
+
+        # --- WAM Pretrained Encoder Parameters ---
+        self.wam_weight_path = '/mnt/nas5/suhyeon/checkpoints/wam/'
+        self.wam_num_bits = 32
 
         # --- Robustness Parameters ---
         self.eps0_std = [0.0, 0.25] # Latent noise
-        
+
         # --- Demo/Evaluation Parameters ---
         self.batch_size = 1
         # self.num_test_images = 1
 
-        self.feature_dim = None
-        # tiny, small
-        if self.feat_layer == 0:
-            self.feature_dim = 96
-        elif self.feat_layer == 1:
-            self.feature_dim = 192
-        elif self.feat_layer == 2:
-            self.feature_dim = 384
-        elif self.feat_layer == 3:
-            self.feature_dim = 768
-        # base
-        # if self.feat_layer == 0:
-        #     self.feature_dim = 96
-        # elif self.feat_layer == 1:
-        #     self.feature_dim = 256
-        # elif self.feat_layer == 2:
-        #     self.feature_dim = 384
-        # elif self.feat_layer == 3:
-        #     self.feature_dim = 768
+        # WAM sam_base encoder: out_chans = 768
+        self.feature_dim = 768
 
 def run_locmark(args=None, save_dir=None):
     """Run complete LocMark demonstration"""
