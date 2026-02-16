@@ -55,7 +55,7 @@ class DotProductExperiment:
         self.device = args['device']
         
         self.extractor = FeatureExtractor(
-            model_name='convnext_small.dinov3_lvd1689m',
+            model_name='hrnet_w32',
             layer_idx=args['feat_layer_idx'],
             device=self.device
         )
