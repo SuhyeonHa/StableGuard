@@ -28,9 +28,9 @@ class Params:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0034.png'
-        self.exp_name = 'hard-noise-jnd-1.5'
+        self.exp_name = '00-baseline'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
-        self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours_jnd' # NOTE: multi image optimization, exp_name
+        self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours_ablation' # NOTE: multi image optimization, exp_name
         # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
         self.single_image_mode = False # NOTE
         self.num_test_images = 100 # the first n images
@@ -61,16 +61,16 @@ class Params:
         # --- Optimization Parameters ---
         self.lr = 2.0
         self.steps = 300
-        self.lambda_p = None #0.1 #0.05 #0.025
-        self.lambda_i = None #0.05 #0.01 #0.005
+        self.lambda_p = 0.1 #0.1 #0.05 #0.025
+        self.lambda_i = 0.05 #0.05 #0.01 #0.005
         self.lambda_clean = 1.0
         self.lambda_noisy = 1.0
         self.feat_layer = 1
-        self.epsilon = None
+        self.epsilon = 16/255
 
         # --- JND (Just Noticeable Difference) Parameters ---
-        self.use_jnd = True  # Enable JND-based perceptual masking
-        self.jnd_alpha = 1.5  # JND modulation strength (higher = stronger watermark)
+        self.use_jnd = False  # Enable JND-based perceptual loss
+        self.lambda_jnd = 10.0  # JND loss weight
 
         # --- Robustness Parameters ---
         self.eps0_std = [0.0, 0.25] # Latent noise

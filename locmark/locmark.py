@@ -170,7 +170,7 @@ class LocMark:
         if use_jnd:
             with torch.no_grad():
                 jnd_hmap = self.jnd.heatmaps(image)  # [B, 3, H, W], in [0,1] scale
-            print(f"[JND] alpha={self.args.jnd_alpha}, heatmap range=[{jnd_hmap.min():.4f}, {jnd_hmap.max():.4f}]")
+            print(f"[JND] lambda={self.args.lambda_jnd}, heatmap range=[{jnd_hmap.min():.4f}, {jnd_hmap.max():.4f}]")
 
         # Training loop
         for step in range(self.args.steps):
@@ -194,15 +194,16 @@ class LocMark:
             watermarked_image = self.pipe.vae.decode(perturbed_latent).sample
             watermarked_image = (watermarked_image + 1) / 2
 
-            # JND modulation: imgs_w = imgs + alpha * hmaps * (imgs_w - imgs)
+            # JND loss: penalize perturbations exceeding JND threshold
             if use_jnd:
-                watermarked_image = image_512 + self.args.jnd_alpha * jnd_hmap * (watermarked_image - image_512)
+                pixel_delta = watermarked_image - image_512
+                loss_jnd = torch.mean(F.relu(torch.abs(pixel_delta) - jnd_hmap))
 
             # clamp
-            # with torch.no_grad():
-            #     pixel_delta = watermarked_image - image_512
-            #     pixel_delta = torch.clamp(pixel_delta, -self.args.epsilon, self.args.epsilon)
-            #     watermarked_image.data = torch.clamp(image_512 + pixel_delta, 0, 1)
+            with torch.no_grad():
+                pixel_delta = watermarked_image - image_512
+                pixel_delta = torch.clamp(pixel_delta, -self.args.epsilon, self.args.epsilon)
+                watermarked_image.data = torch.clamp(image_512 + pixel_delta, 0, 1)
 
             # Patch noise injection
             if is_noise:
@@ -218,10 +219,10 @@ class LocMark:
                 watermarked_image_1 = (watermarked_image_1 + 1) / 2
 
                 # clamp
-                # with torch.no_grad():
-                #     pixel_delta_1 = watermarked_image_1 - image_512
-                #     pixel_delta_1 = torch.clamp(pixel_delta_1, -self.args.epsilon, self.args.epsilon)
-                #     watermarked_image_1.data = torch.clamp(image_512 + pixel_delta_1, 0, 1)
+                with torch.no_grad():
+                    pixel_delta_1 = watermarked_image_1 - image_512
+                    pixel_delta_1 = torch.clamp(pixel_delta_1, -self.args.epsilon, self.args.epsilon)
+                    watermarked_image_1.data = torch.clamp(image_512 + pixel_delta_1, 0, 1)
 
             # Compute losses
             image = F.interpolate(original, size=(img_size, img_size), mode="bilinear", align_corners=False)
@@ -307,19 +308,22 @@ class LocMark:
             image = denorm_imagenet(image)
             watermarked_image = denorm_imagenet(watermarked_image)
 
-            # loss_psnr = self._psnr_loss(watermarked_image, image)
-            # loss_lpips = self._lpips_loss(watermarked_image, image)
+            loss_psnr = self._psnr_loss(watermarked_image, image)
+            loss_lpips = self._lpips_loss(watermarked_image, image)
 
-            total_loss = self.args.lambda_clean * loss_m
-                        #   self.args.lambda_p * loss_psnr + \
-                        #   self.args.lambda_i * loss_lpips
-            
+            total_loss = self.args.lambda_clean * loss_m + \
+                          self.args.lambda_p * loss_psnr + \
+                          self.args.lambda_i * loss_lpips
+
+            if use_jnd:
+                total_loss += self.args.lambda_jnd * loss_jnd
+
             if is_noise:
                 total_loss += self.args.lambda_noisy * loss_m1
-                
+
             if is_hard:
                 total_loss += loss_h
-            
+
             if is_hard and is_noise:
                 total_loss += loss_h1
             
@@ -330,6 +334,8 @@ class LocMark:
                 psnr_val = self._compute_psnr(watermarked_image.detach(), image.detach())
                 print(f"Step {step+1}, Loss: {total_loss.item():.4f}, PSNR: {psnr_val:.2f}")
                 print(f"Mask loss: {loss_m.item():.4f}")
+                if use_jnd:
+                    print(f"JND loss: {loss_jnd.item():.4f}")
                 if is_noise:
                     print(f"Mask1 loss: {loss_m1.item():.4f}")
                 if is_hard:
@@ -344,13 +350,10 @@ class LocMark:
             rec_wm = self.pipe.vae.decode(latent_wm).sample
             rec_wm = (rec_wm + 1) / 2
 
-            if use_jnd:
-                rec_wm = image_512 + self.args.jnd_alpha * jnd_hmap * (rec_wm - image_512)
-
-            # final_delta = torch.clamp(rec_wm - image_512, -self.args.epsilon, self.args.epsilon)
-            # final_images = torch.clamp(image_512 + final_delta, 0, 1)
-            final_delta = rec_wm - image_512
+            final_delta = torch.clamp(rec_wm - image_512, -self.args.epsilon, self.args.epsilon)
             final_images = torch.clamp(image_512 + final_delta, 0, 1)
+            # final_delta = rec_wm - image_512
+            # final_images = torch.clamp(image_512 + final_delta, 0, 1)
         return final_images.detach(), final_delta.detach()
         
     def decode_watermark(self, watermarked_image: torch.Tensor) -> torch.Tensor:
