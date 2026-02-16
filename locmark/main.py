@@ -28,7 +28,7 @@ class Params:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0034.png'
-        self.exp_name = 'noise-hinge-hard-4'
+        self.exp_name = 'noise-hinge-hard-6'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
         self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours_swin' # NOTE: multi image optimization, exp_name
         # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
@@ -66,7 +66,7 @@ class Params:
         self.lambda_clean = 1.0
         self.lambda_noisy = 1.0
         self.feat_layer = 1
-        self.epsilon = 4/255
+        self.epsilon = 6/255
 
         # --- JND (Just Noticeable Difference) Parameters ---
         self.use_jnd = False  # Enable JND-based perceptual masking
