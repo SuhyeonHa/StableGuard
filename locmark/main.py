@@ -28,7 +28,7 @@ class Params:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0034.png'
-        self.exp_name = '02-noise-hinge'
+        self.exp_name = '00-baseline'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
         self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours_ablation' # NOTE: multi image optimization, exp_name
         # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
@@ -56,7 +56,7 @@ class Params:
         self.num_inference_steps = 100
         self.guidance_scale = 7.5
         self.temperature = 5.0
-        self.target_cossim = 0.05
+        self.target_cossim = 0.2
 
         # --- Optimization Parameters ---
         self.lr = 2.0
@@ -69,18 +69,35 @@ class Params:
         self.epsilon = 16/255
 
         # --- JND (Just Noticeable Difference) Parameters ---
-        self.use_jnd = False  # Enable JND-based perceptual loss
-        self.lambda_jnd = 10.0  # JND loss weight
+        self.use_jnd = False  # Enable JND-based perceptual masking
+        self.jnd_alpha = 1.0  # JND modulation strength (higher = more aggressive masking)
 
         # --- Robustness Parameters ---
         self.eps0_std = [0.0, 0.25] # Latent noise
-
+        
         # --- Demo/Evaluation Parameters ---
         self.batch_size = 1
         # self.num_test_images = 1
 
-        # WAM sam_base encoder: out_chans = 768
-        self.feature_dim = 768
+        self.feature_dim = None
+        # tiny, small
+        if self.feat_layer == 0:
+            self.feature_dim = 96
+        elif self.feat_layer == 1:
+            self.feature_dim = 192
+        elif self.feat_layer == 2:
+            self.feature_dim = 384
+        elif self.feat_layer == 3:
+            self.feature_dim = 768
+        # base
+        # if self.feat_layer == 0:
+        #     self.feature_dim = 96
+        # elif self.feat_layer == 1:
+        #     self.feature_dim = 256
+        # elif self.feat_layer == 2:
+        #     self.feature_dim = 384
+        # elif self.feat_layer == 3:
+        #     self.feature_dim = 768
 
 def run_locmark(args=None, save_dir=None):
     """Run complete LocMark demonstration"""
