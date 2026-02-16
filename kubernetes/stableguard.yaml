@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-locmark-05-hinge
+  name: suhyeon-train-locmark-06-hinge-hard
 spec:
   template:
     spec:
