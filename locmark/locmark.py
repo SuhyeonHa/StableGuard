@@ -27,7 +27,7 @@ class LocMark:
             'convnextv2_base.fcmae_ft_in22k_in1k',
             pretrained=True,
             features_only=True,
-            out_indices=(1, 2, 3, 4)
+            out_indices=(0, 1, 2, 3)
         ).to(self.args.device)
         # self.feature_upsampler = torch.hub.load('wimmerth/anyup', 'anyup_multi_backbone', use_natten=True).to(self.args.device)
 
