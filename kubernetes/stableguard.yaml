@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-locmark-4-convnext2-p-0.025-noise-hard
+  name: suhyeon-train-locmark-4-convnext2-p-0.05-noise-hard
 spec:
   template:
     spec:
