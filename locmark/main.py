@@ -84,7 +84,7 @@ class Params:
         if self.feat_layer == 0:
             self.feature_dim = 96
         elif self.feat_layer == 1:
-            self.feature_dim = 192
+            self.feature_dim = 256 #convnext2
         elif self.feat_layer == 2:
             self.feature_dim = 384
         elif self.feat_layer == 3:
