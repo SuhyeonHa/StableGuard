@@ -24,9 +24,10 @@ class LocMark:
             cache_dir='/mnt/nas5/suhyeon/caches'
         ).to(self.args.device)
         self.image_encoder = timm.create_model(
-            'swinv2_small_window16_256',
+            'convnextv2_base.fcmae_ft_in22k_in1k',
             pretrained=True,
-            features_only=True
+            features_only=True,
+            out_indices=(1, 2, 3, 4)
         ).to(self.args.device)
         # self.feature_upsampler = torch.hub.load('wimmerth/anyup', 'anyup_multi_backbone', use_natten=True).to(self.args.device)
 
@@ -57,10 +58,13 @@ class LocMark:
             self.jnd.eval()
 
     def _extract_features(self, x):
-        """Extract features and convert Swin's (B, H, W, C) → (B, C, H, W)"""
-        feat = self.image_encoder(x)[self.args.feat_layer]
+        features = self.image_encoder(x)
+        feat = features[self.args.feat_layer]
+        
         if feat.ndim == 4 and feat.shape[1] != feat.shape[3]:
-            feat = feat.permute(0, 3, 1, 2)  # (B, H, W, C) → (B, C, H, W)
+            if feat.shape[-1] == feat.shape[1]:
+                feat = feat.permute(0, 3, 1, 2)
+                
         return feat
 
     def generate_universal_vectors(self, feature_dim):
@@ -246,7 +250,6 @@ class LocMark:
             # masked_1 = norm_imagenet(masked_1)
 
             features = self._extract_features(image)
-            features = F.instance_norm(features)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
@@ -259,7 +262,6 @@ class LocMark:
             noise_floor = torch.max(base_cos_sim)
 
             features = self._extract_features(watermarked_image)
-            features = F.instance_norm(features)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
@@ -273,7 +275,6 @@ class LocMark:
                 watermarked_image_1 = norm_imagenet(watermarked_image_1)
 
                 features = self._extract_features(watermarked_image_1)
-                features = F.instance_norm(features)
                 features = features.permute(0, 2, 3, 1).view(B, H * W, C)
                 features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
                 cos_sim_1 = torch.matmul(features_norm, self.direction_vectors.T)
@@ -365,7 +366,6 @@ class LocMark:
         with torch.no_grad():
             watermarked_image = norm_imagenet(watermarked_image) 
             features = self._extract_features(watermarked_image)
-            features = F.instance_norm(features)
             features = smoother(features)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
