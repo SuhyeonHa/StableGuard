@@ -24,7 +24,7 @@ class LocMark:
             cache_dir='/mnt/nas5/suhyeon/caches'
         ).to(self.args.device)
         self.image_encoder = timm.create_model(
-            'convnextv2_tiny.fcmae_ft_in22k_in1k',
+            'convnextv2_base.fcmae_ft_in22k_in1k',
             pretrained=True,
             features_only=True,
             out_indices=(0, 1, 2, 3)
@@ -306,6 +306,10 @@ class LocMark:
             # masked_1 = denorm_imagenet(masked_1)
 
             if is_noise:
+                if is_hinge:
+                    loss_m1 = torch.mean(F.relu(target_cosine - cos_sim_1))
+                else:
+                    loss_m1 = torch.mean(1 - cos_sim_1)
                 loss_m1 = torch.mean(F.relu(target_cosine - cos_sim_1))
                 watermarked_image_1 = denorm_imagenet(watermarked_image_1)
 
