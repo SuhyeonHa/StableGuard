@@ -45,9 +45,9 @@ class LocMark:
         
         # self.direction_vectors = torch.load('/mnt/nas5/suhyeon/projects/freq-loc/random_vec.pt').to(self.args.device)
         # self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/random_vec_univ_{self.args.feature_dim}.pt').to(self.args.device)
-        # self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt').to(self.args.device)
-        self.direction_vectors = self.generate_universal_vectors(self.args.feature_dim)
-        torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt')
+        self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt').to(self.args.device)
+        # self.direction_vectors = self.generate_universal_vectors(self.args.feature_dim)
+        # torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt')
         self.num_patches = (self.args.image_size // 14) ** 2
 
         self.loss_fn_vgg = lpips.LPIPS(net='alex').to(self.args.device)
