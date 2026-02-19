@@ -45,9 +45,9 @@ class LocMark:
         
         # self.direction_vectors = torch.load('/mnt/nas5/suhyeon/projects/freq-loc/random_vec.pt').to(self.args.device)
         # self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/random_vec_univ_{self.args.feature_dim}.pt').to(self.args.device)
-        self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt').to(self.args.device)
-        # self.direction_vectors = self.generate_universal_vectors(self.args.feature_dim)
-        # torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt')
+        # self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt').to(self.args.device)
+        self.direction_vectors = self.generate_universal_vectors(self.args.feature_dim)
+        torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/new_{self.args.feature_dim}.pt')
         self.num_patches = (self.args.image_size // 14) ** 2
 
         self.loss_fn_vgg = lpips.LPIPS(net='alex').to(self.args.device)
@@ -67,25 +67,46 @@ class LocMark:
                 
         return feat
 
+    # def generate_universal_vectors(self, feature_dim):
+    #     """
+    #     어떤 Feature가 들어와도 DC 성분(크기)을 무시하고 
+    #     방향만 검출할 수 있는 Universal Vector 생성
+    #     """
+    #     # vecs = torch.ones(1, feature_dim)
+    #     # 1. 랜덤 생성
+    #     vecs = torch.randn(1, feature_dim)
+        
+    #     # # 2. [핵심] Zero-Mean Centering (평균 제거)
+    #     # # 각 벡터(row)의 평균을 계산해서 뺌 -> 합이 0이 됨
+    #     vecs = vecs - vecs.mean(dim=1, keepdim=True)
+        
+    #     # # 3. Sign Quantization (강건성 향상)
+    #     # # 0인 경우를 방지하기 위해 아주 작은 noise 추가 후 sign
+    #     vecs = torch.sign(vecs + 1e-6)
+        
+    #     # 4. L2 Normalization
+    #     vecs = vecs / torch.norm(vecs, p=2, dim=1, keepdim=True)
+        
+    #     return vecs.to(self.args.device)
+
     def generate_universal_vectors(self, feature_dim):
-        """
-        어떤 Feature가 들어와도 DC 성분(크기)을 무시하고 
-        방향만 검출할 수 있는 Universal Vector 생성
-        """
-        # vecs = torch.ones(1, feature_dim)
-        # 1. 랜덤 생성
-        vecs = torch.randn(1, feature_dim)
+        # 1. 절반의 차원만 무작위 생성 (Gaussian)
+        half_dim = feature_dim // 2
+        half_vecs = torch.randn(1, half_dim)
         
-        # # 2. [핵심] Zero-Mean Centering (평균 제거)
-        # # 각 벡터(row)의 평균을 계산해서 뺌 -> 합이 0이 됨
-        vecs = vecs - vecs.mean(dim=1, keepdim=True)
+        # 2. [핵심] 대칭적 반전 (Symmetric Pairing)
+        # 절반은 +x, 나머지 절반은 -x로 구성하여 
+        # 수학적으로 sum(vecs) = 0 을 부동 소수점 오차 없이 완벽하게 보장함
+        vecs = torch.cat([half_vecs, -half_vecs], dim=1)
         
-        # # 3. Sign Quantization (강건성 향상)
-        # # 0인 경우를 방지하기 위해 아주 작은 noise 추가 후 sign
-        vecs = torch.sign(vecs + 1e-6)
+        # 3. 채널 간 상관관계를 무작위화하기 위한 셔플
+        # ConvNeXt의 특정 채널 그룹 바이어스에 걸리지 않도록 순서를 섞음
+        indices = torch.randperm(feature_dim)
+        vecs = vecs[:, indices]
         
-        # 4. L2 Normalization
-        vecs = vecs / torch.norm(vecs, p=2, dim=1, keepdim=True)
+        # 4. L2 Normalization (방향성 고정)
+        # 합이 0인 상태에서 정규화해도 방향만 바뀔 뿐 합은 여전히 0임
+        vecs = F.normalize(vecs, p=2, dim=1)
         
         return vecs.to(self.args.device)
 
