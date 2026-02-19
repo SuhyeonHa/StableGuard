@@ -24,7 +24,7 @@ class LocMark:
             cache_dir='/mnt/nas5/suhyeon/caches'
         ).to(self.args.device)
         self.image_encoder = timm.create_model(
-            'swinv2_small_window8_256',
+            'swinv2_small_window16_256',
             pretrained=True,
             features_only=True
         ).to(self.args.device)
@@ -322,7 +322,7 @@ class LocMark:
                 total_loss += self.args.lambda_noisy * loss_m1
                 
             if is_hard:
-                total_loss += 2*loss_h
+                total_loss += loss_h
             
             if is_hard and is_noise:
                 total_loss += loss_h1
