@@ -310,7 +310,6 @@ class LocMark:
                     loss_m1 = torch.mean(F.relu(target_cosine - cos_sim_1))
                 else:
                     loss_m1 = torch.mean(1 - cos_sim_1)
-                loss_m1 = torch.mean(F.relu(target_cosine - cos_sim_1))
                 watermarked_image_1 = denorm_imagenet(watermarked_image_1)
 
             if is_hard and is_noise:
