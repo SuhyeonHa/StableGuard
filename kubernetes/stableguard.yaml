@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-locmark-4-convnext2-base-l0-p0.05
+  name: suhyeon-train-locmark-convnext2-sub-mean
 spec:
   template:
     spec:

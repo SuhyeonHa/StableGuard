@@ -252,6 +252,8 @@ class LocMark:
             features = self._extract_features(image)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
+            feat_mean = features.mean(dim=1, keepdim=True)
+            features = features - feat_mean
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
             base_cos_sim = torch.matmul(features_norm, self.direction_vectors.T)
 
@@ -264,6 +266,8 @@ class LocMark:
             features = self._extract_features(watermarked_image)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
+            feat_mean = features.mean(dim=1, keepdim=True)
+            features = features - feat_mean
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
             cos_sim = torch.matmul(features_norm, self.direction_vectors.T)
             if step == 0 or (step+1) % 100 == 0:
@@ -276,6 +280,8 @@ class LocMark:
 
                 features = self._extract_features(watermarked_image_1)
                 features = features.permute(0, 2, 3, 1).view(B, H * W, C)
+                feat_mean = features.mean(dim=1, keepdim=True)
+                features = features - feat_mean
                 features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
                 cos_sim_1 = torch.matmul(features_norm, self.direction_vectors.T)
                 if step == 0 or (step+1) % 100 == 0:
@@ -372,6 +378,8 @@ class LocMark:
             features = smoother(features)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
+            feat_mean = features.mean(dim=1, keepdim=True)
+            features = features - feat_mean
             # dot_products = torch.matmul(features, self.direction_vectors.T) # [1, 256, 384]*[1, 384, 256] -> [1, 256, 1]
 
             epsilon = 1e-6
