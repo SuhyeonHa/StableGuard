@@ -28,7 +28,7 @@ class Params:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0034.png'
-        self.exp_name = 'noise-hard-4'
+        self.exp_name = 'noise-hinge-hard-l0'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
         self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours_convnext2' # NOTE: multi image optimization, exp_name
         # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
@@ -65,7 +65,7 @@ class Params:
         self.lambda_i = 0.01 #0.05 #0.01 #0.005 #0.001 
         self.lambda_clean = 1.0
         self.lambda_noisy = 1.0
-        self.feat_layer = 1
+        self.feat_layer = 0
         self.epsilon = 4/255
 
         # --- JND (Just Noticeable Difference) Parameters ---
@@ -80,15 +80,11 @@ class Params:
         # self.num_test_images = 1
 
         self.feature_dim = None
-        # swinv2_small_window8_256
+        # convnext2
         if self.feat_layer == 0:
-            self.feature_dim = 96
+            self.feature_dim = 128
         elif self.feat_layer == 1:
-            self.feature_dim = 256 #convnext2
-        elif self.feat_layer == 2:
-            self.feature_dim = 384
-        elif self.feat_layer == 3:
-            self.feature_dim = 768
+            self.feature_dim = 256 
 
 def run_locmark(args=None, save_dir=None):
     """Run complete LocMark demonstration"""
