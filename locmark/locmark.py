@@ -322,7 +322,7 @@ class LocMark:
                 total_loss += self.args.lambda_noisy * loss_m1
                 
             if is_hard:
-                total_loss += loss_h
+                total_loss += 2*loss_h
             
             if is_hard and is_noise:
                 total_loss += loss_h1
