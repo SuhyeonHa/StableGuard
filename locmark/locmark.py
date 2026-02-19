@@ -246,6 +246,7 @@ class LocMark:
             # masked_1 = norm_imagenet(masked_1)
 
             features = self._extract_features(image)
+            features = F.instance_norm(features, affine=False)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
@@ -258,6 +259,7 @@ class LocMark:
             noise_floor = torch.max(base_cos_sim)
 
             features = self._extract_features(watermarked_image)
+            features = F.instance_norm(features, affine=False)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
@@ -271,6 +273,7 @@ class LocMark:
                 watermarked_image_1 = norm_imagenet(watermarked_image_1)
 
                 features = self._extract_features(watermarked_image_1)
+                features = F.instance_norm(features, affine=False)
                 features = features.permute(0, 2, 3, 1).view(B, H * W, C)
                 features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
                 cos_sim_1 = torch.matmul(features_norm, self.direction_vectors.T)
@@ -362,6 +365,7 @@ class LocMark:
         with torch.no_grad():
             watermarked_image = norm_imagenet(watermarked_image) 
             features = self._extract_features(watermarked_image)
+            features = F.instance_norm(features, affine=False)
             features = smoother(features)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
