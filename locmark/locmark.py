@@ -24,7 +24,7 @@ class LocMark:
             cache_dir='/mnt/nas5/suhyeon/caches'
         ).to(self.args.device)
         self.image_encoder = timm.create_model(
-            'convnextv2_base.fcmae_ft_in22k_in1k',
+            'convnextv2_tiny.fcmae_ft_in22k_in1k',
             pretrained=True,
             features_only=True,
             out_indices=(0, 1, 2, 3)
@@ -45,9 +45,9 @@ class LocMark:
         
         # self.direction_vectors = torch.load('/mnt/nas5/suhyeon/projects/freq-loc/random_vec.pt').to(self.args.device)
         # self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/random_vec_univ_{self.args.feature_dim}.pt').to(self.args.device)
-        # self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt').to(self.args.device)
-        self.direction_vectors = self.generate_universal_vectors(self.args.feature_dim)
-        torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt')
+        self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt').to(self.args.device)
+        # self.direction_vectors = self.generate_universal_vectors(self.args.feature_dim)
+        # torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt')
         self.num_patches = (self.args.image_size // 14) ** 2
 
         self.loss_fn_vgg = lpips.LPIPS(net='alex').to(self.args.device)
