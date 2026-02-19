@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-locmark-4-convnext2-base-l0-p0.01-new-anchor
+  name: suhyeon-train-locmark-4-convnext2-base-l0-p0.05
 spec:
   template:
     spec:
