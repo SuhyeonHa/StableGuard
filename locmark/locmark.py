@@ -24,7 +24,7 @@ class LocMark:
             cache_dir='/mnt/nas5/suhyeon/caches'
         ).to(self.args.device)
         self.image_encoder = timm.create_model(
-            'convnextv2_base.fcmae_ft_in22k_in1k',
+            'convnextv2_tiny.fcmae_ft_in22k_in1k',
             pretrained=True,
             features_only=True,
             out_indices=(0, 1, 2, 3)
