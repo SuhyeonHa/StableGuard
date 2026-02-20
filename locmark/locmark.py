@@ -184,12 +184,6 @@ class LocMark:
 
             # masked = watermarked_image * mask + (1 - mask) * image
 
-            # clamp
-            with torch.no_grad():
-                pixel_delta = watermarked_image - image_512
-                pixel_delta = torch.clamp(pixel_delta, -self.args.epsilon, self.args.epsilon)
-                watermarked_image.data = torch.clamp(image_512 + pixel_delta, 0, 1)
-
             # Patch noise injection
             if is_noise:
                 # uniform noise
@@ -202,12 +196,6 @@ class LocMark:
 
                 watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
                 watermarked_image_1 = (watermarked_image_1 + 1) / 2
-
-                # clamp
-                with torch.no_grad():
-                    pixel_delta_1 = watermarked_image_1 - image_512
-                    pixel_delta_1 = torch.clamp(pixel_delta_1, -self.args.epsilon, self.args.epsilon)
-                    watermarked_image_1.data = torch.clamp(image_512 + pixel_delta_1, 0, 1)
 
             # Compute losses
             image = F.interpolate(original, size=(img_size, img_size), mode="bilinear", align_corners=False)
@@ -311,6 +299,14 @@ class LocMark:
             
             total_loss.backward()
             optimizer.step()
+
+            # PGD projection: project delta_m so pixel perturbation stays within epsilon ball
+            with torch.no_grad():
+                wm_pgd = self.pipe.vae.decode(latent + delta_m).sample
+                wm_pgd = (wm_pgd + 1) / 2
+                px_delta_pgd = torch.clamp(wm_pgd - image_512, -self.args.epsilon, self.args.epsilon)
+                wm_proj = torch.clamp(image_512 + px_delta_pgd, 0.0, 1.0)
+                delta_m.data = self.pipe.vae.encode(2 * wm_proj - 1).latent_dist.mean - latent
 
             if step == 0 or (step+1) % 100 == 0:
                 psnr_val = self._compute_psnr(watermarked_image.detach(), image.detach())
