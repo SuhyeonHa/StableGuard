@@ -24,10 +24,9 @@ class LocMark:
             cache_dir='/mnt/nas5/suhyeon/caches'
         ).to(self.args.device)
         self.image_encoder = timm.create_model(
-            'convnextv2_base.fcmae_ft_in22k_in1k',
+            'convnext_small.dinov3_lvd1689m',
             pretrained=True,
             features_only=True,
-            out_indices=(0, 1, 2, 3)
         ).to(self.args.device)
         # self.feature_upsampler = torch.hub.load('wimmerth/anyup', 'anyup_multi_backbone', use_natten=True).to(self.args.device)
 
@@ -45,8 +44,7 @@ class LocMark:
         
         # self.direction_vectors = torch.load('/mnt/nas5/suhyeon/projects/freq-loc/random_vec.pt').to(self.args.device)
         # self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/random_vec_univ_{self.args.feature_dim}.pt').to(self.args.device)
-        # self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt').to(self.args.device)
-        self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/anchor_cvnt2_{self.args.feature_dim}.pt').to(self.args.device)
+        self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt').to(self.args.device)
         # self.direction_vectors = self.generate_universal_vectors(self.args.feature_dim)
         # torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt')
         self.num_patches = (self.args.image_size // 14) ** 2
@@ -213,8 +211,8 @@ class LocMark:
             # clamp
             with torch.no_grad():
                 pixel_delta = watermarked_image - image_512
-                pixel_delta = torch.clamp(pixel_delta, -self.args.epsilon, self.args.epsilon)
-                watermarked_image.data = torch.clamp(image_512 + pixel_delta, 0, 1)
+                pixel_delta_clamped = torch.clamp(pixel_delta, -self.args.epsilon, self.args.epsilon)
+                watermarked_image.data = torch.clamp(image_512 + pixel_delta_clamped, 0.0, 1.0)
 
             # Patch noise injection
             if is_noise:
@@ -232,8 +230,8 @@ class LocMark:
                 # clamp
                 with torch.no_grad():
                     pixel_delta_1 = watermarked_image_1 - image_512
-                    pixel_delta_1 = torch.clamp(pixel_delta_1, -self.args.epsilon, self.args.epsilon)
-                    watermarked_image_1.data = torch.clamp(image_512 + pixel_delta_1, 0, 1)
+                    pixel_delta_1_clamped = torch.clamp(pixel_delta_1, -self.args.epsilon, self.args.epsilon)
+                    watermarked_image_1.data = torch.clamp(image_512 + pixel_delta_1_clamped, 0.0, 1.0)
 
             # Compute losses
             image = F.interpolate(original, size=(img_size, img_size), mode="bilinear", align_corners=False)
@@ -325,7 +323,7 @@ class LocMark:
             image = denorm_imagenet(image)
             watermarked_image = denorm_imagenet(watermarked_image)
 
-            loss_psnr = self._psnr_loss(watermarked_image, image)
+            loss_psnr = F.mse_loss(watermarked_image, image)
             loss_lpips = self._lpips_loss(watermarked_image, image)
 
             total_loss = self.args.lambda_clean * loss_m + \
@@ -365,8 +363,9 @@ class LocMark:
             if use_jnd:
                 rec_wm = image_512 + self.args.jnd_alpha * jnd_hmap * (rec_wm - image_512)
 
-            final_delta = torch.clamp(rec_wm - image_512, -self.args.epsilon, self.args.epsilon)
-            final_images = torch.clamp(image_512 + final_delta, 0, 1)
+            final_delta = rec_wm - image_512
+            final_delta_clamped = torch.clamp(final_delta, -self.args.epsilon, self.args.epsilon)
+            final_images = torch.clamp(image_512 + final_delta_clamped, 0.0, 1.0)
         return final_images.detach(), final_delta.detach()
         
     def decode_watermark(self, watermarked_image: torch.Tensor) -> torch.Tensor:
