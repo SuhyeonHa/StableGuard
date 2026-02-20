@@ -208,12 +208,6 @@ class LocMark:
             if use_jnd:
                 watermarked_image = image_512 + self.args.jnd_alpha * jnd_hmap * (watermarked_image - image_512)
 
-            # clamp
-            with torch.no_grad():
-                pixel_delta = watermarked_image - image_512
-                pixel_delta_clamped = torch.clamp(pixel_delta, -self.args.epsilon, self.args.epsilon)
-                watermarked_image.data = torch.clamp(image_512 + pixel_delta_clamped, 0.0, 1.0)
-
             # Patch noise injection
             if is_noise:
                 # uniform noise
@@ -228,10 +222,7 @@ class LocMark:
                 watermarked_image_1 = (watermarked_image_1 + 1) / 2
 
                 # clamp
-                with torch.no_grad():
-                    pixel_delta_1 = watermarked_image_1 - image_512
-                    pixel_delta_1_clamped = torch.clamp(pixel_delta_1, -self.args.epsilon, self.args.epsilon)
-                    watermarked_image_1.data = torch.clamp(image_512 + pixel_delta_1_clamped, 0.0, 1.0)
+                watermarked_image_1 = torch.clamp(watermarked_image_1, 0.0, 1.0)
 
             # Compute losses
             image = F.interpolate(original, size=(img_size, img_size), mode="bilinear", align_corners=False)
@@ -323,7 +314,7 @@ class LocMark:
             image = denorm_imagenet(image)
             watermarked_image = denorm_imagenet(watermarked_image)
 
-            loss_psnr = F.mse_loss(watermarked_image, image)
+            loss_psnr = self._psnr_loss(watermarked_image, image)
             loss_lpips = self._lpips_loss(watermarked_image, image)
 
             total_loss = self.args.lambda_clean * loss_m + \
@@ -341,6 +332,16 @@ class LocMark:
             
             total_loss.backward()
             optimizer.step()
+
+            # PGD projection: project delta_m so pixel perturbation stays within epsilon ball
+            with torch.no_grad():
+                wm_pgd = self.pipe.vae.decode(latent + delta_m).sample
+                wm_pgd = (wm_pgd + 1) / 2
+                if use_jnd:
+                    wm_pgd = image_512 + self.args.jnd_alpha * jnd_hmap * (wm_pgd - image_512)
+                px_delta_pgd = torch.clamp(wm_pgd - image_512, -self.args.epsilon, self.args.epsilon)
+                wm_proj = torch.clamp(image_512 + px_delta_pgd, 0.0, 1.0)
+                delta_m.data = self.pipe.vae.encode(2 * wm_proj - 1).latent_dist.mean - latent
 
             if step == 0 or (step+1) % 100 == 0:
                 psnr_val = self._compute_psnr(watermarked_image.detach(), image.detach())
@@ -363,9 +364,8 @@ class LocMark:
             if use_jnd:
                 rec_wm = image_512 + self.args.jnd_alpha * jnd_hmap * (rec_wm - image_512)
 
-            final_delta = rec_wm - image_512
-            final_delta_clamped = torch.clamp(final_delta, -self.args.epsilon, self.args.epsilon)
-            final_images = torch.clamp(image_512 + final_delta_clamped, 0.0, 1.0)
+            final_delta = torch.clamp(rec_wm - image_512, -self.args.epsilon, self.args.epsilon)
+            final_images = torch.clamp(image_512 + final_delta, 0, 1)
         return final_images.detach(), final_delta.detach()
         
     def decode_watermark(self, watermarked_image: torch.Tensor) -> torch.Tensor:
