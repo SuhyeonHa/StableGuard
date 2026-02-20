@@ -309,7 +309,7 @@ class LocMark:
                 watermarked_image_1 = denorm_imagenet(watermarked_image_1)
 
             if is_hard and is_noise:
-                loss_h1 = self._hard_negative_mining_loss(cos_sim_1, target_cosine, k_percent=0.5)
+                loss_h1 = self._hard_negative_mining_loss(cos_sim_1, target_cosine, k_percent=0.1)
 
             image = denorm_imagenet(image)
             watermarked_image = denorm_imagenet(watermarked_image)
