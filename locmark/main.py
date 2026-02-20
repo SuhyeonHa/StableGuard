@@ -80,11 +80,15 @@ class Params:
         # self.num_test_images = 1
 
         self.feature_dim = None
-        # convnext2-base
+        # tiny, small
         if self.feat_layer == 0:
-            self.feature_dim = 128
+            self.feature_dim = 96
         elif self.feat_layer == 1:
-            self.feature_dim = 256 
+            self.feature_dim = 192
+        elif self.feat_layer == 2:
+            self.feature_dim = 384
+        elif self.feat_layer == 3:
+            self.feature_dim = 768
 
 def run_locmark(args=None, save_dir=None):
     """Run complete LocMark demonstration"""
