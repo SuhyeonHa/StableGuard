@@ -300,14 +300,6 @@ class LocMark:
             total_loss.backward()
             optimizer.step()
 
-            # PGD projection: project delta_m so pixel perturbation stays within epsilon ball
-            with torch.no_grad():
-                wm_pgd = self.pipe.vae.decode(latent + delta_m).sample
-                wm_pgd = (wm_pgd + 1) / 2
-                px_delta_pgd = torch.clamp(wm_pgd - image_512, -self.args.epsilon, self.args.epsilon)
-                wm_proj = torch.clamp(image_512 + px_delta_pgd, 0.0, 1.0)
-                delta_m.data = self.pipe.vae.encode(2 * wm_proj - 1).latent_dist.mean - latent
-
             if step == 0 or (step+1) % 100 == 0:
                 psnr_val = self._compute_psnr(watermarked_image.detach(), image.detach())
                 print(f"Step {step+1}, Loss: {total_loss.item():.4f}, PSNR: {psnr_val:.2f}")
