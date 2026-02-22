@@ -1,6 +1,8 @@
 import os
 import warnings
 
+import piq
+
 import locmark_e2e  # path setup — must come before any watermark_anything import
 from locmark_e2e.load_checkpoint import load_locmark_checkpoint
 
@@ -1089,40 +1091,40 @@ if __name__ == "__main__":
 
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
-    save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    generate_watermark_image(norm=c['normalization'],
-                             weight_path=c['weight_path'],
-                             target_model=c['target_model'],
-                             src_image_path=c['src_image_path'],
-                             save_path=c['save_path'],
-                             edit_model_name=c['edit_model_name'],
-                             seed=c['seed'],
-                             num_bits=c['num_bits'],
-                             model_size=c['model_size'],
-                             eval_size=c['eval_size'],
-                             start_idx=c['start_idx'],
-                             end_idx=c['end_idx'],
-                             tamper_mode=c['tamper_mode'],
-                             wm_strength=c['wm_strength'])
+    # save_and_print_cfg = save_and_print_config(c, c['save_path'])
+    # generate_watermark_image(norm=c['normalization'],
+    #                          weight_path=c['weight_path'],
+    #                          target_model=c['target_model'],
+    #                          src_image_path=c['src_image_path'],
+    #                          save_path=c['save_path'],
+    #                          edit_model_name=c['edit_model_name'],
+    #                          seed=c['seed'],
+    #                          num_bits=c['num_bits'],
+    #                          model_size=c['model_size'],
+    #                          eval_size=c['eval_size'],
+    #                          start_idx=c['start_idx'],
+    #                          end_idx=c['end_idx'],
+    #                          tamper_mode=c['tamper_mode'],
+    #                          wm_strength=c['wm_strength'])
 
-    # # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions    
-    for setting in eval_setting:
-        generate_tamper_mask(weight_path=c['weight_path'],
-                            eval_setting=setting,
-                            target_model=c['target_model'],
-                            save_path=c['save_path'],
-                            num_bits=c['num_bits'],
-                            model_size=c['model_size'],
-                            end_idx=c['end_idx'],
-                            aug_type=c['aug_type'],
-                            aug_param=c['aug_param'],
-                            wm_strength=c['wm_strength'])
-        # 3) Evaluate predicted masks against ground-truth masks saved in disk
-        eva = Evaluation(f"{c['save_path']}/pred_bin_mask_{setting}", f"{c['save_path']}/gt", eval_size=c['eval_size'])
-        if c['target_model'] in ('ours', 'ours_e2e'):
-            eva.run(f"{c['save_path']}/pred_mask_{setting}", tamper_mode=c['tamper_mode'])
-        else:
-            eva.run(f"{c['save_path']}/pred_bin_mask_{setting}", tamper_mode=c['tamper_mode'])
+    # # # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions    
+    # for setting in eval_setting:
+    #     generate_tamper_mask(weight_path=c['weight_path'],
+    #                         eval_setting=setting,
+    #                         target_model=c['target_model'],
+    #                         save_path=c['save_path'],
+    #                         num_bits=c['num_bits'],
+    #                         model_size=c['model_size'],
+    #                         end_idx=c['end_idx'],
+    #                         aug_type=c['aug_type'],
+    #                         aug_param=c['aug_param'],
+    #                         wm_strength=c['wm_strength'])
+    #     # 3) Evaluate predicted masks against ground-truth masks saved in disk
+    #     eva = Evaluation(f"{c['save_path']}/pred_bin_mask_{setting}", f"{c['save_path']}/gt", eval_size=c['eval_size'])
+    #     if c['target_model'] in ('ours', 'ours_e2e'):
+    #         eva.run(f"{c['save_path']}/pred_mask_{setting}", tamper_mode=c['tamper_mode'])
+    #     else:
+    #         eva.run(f"{c['save_path']}/pred_bin_mask_{setting}", tamper_mode=c['tamper_mode'])
 
     # # 4) Evaluate fidelity between watermarked and original images
     eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'])
