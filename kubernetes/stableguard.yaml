@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-locmark-00-baseline
+  name: suhyeon-train-locmark-01-noise
 spec:
   template:
     spec:
