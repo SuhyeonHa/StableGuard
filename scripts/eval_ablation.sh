@@ -20,10 +20,12 @@ target_dirs=(
 
     # "ours_full/clamp-8/20260201-123208"
     # "ours_full/clamp-12/20260201-065353"
-    "ours_full/clamp-16/20260201-065209"
+    # "ours_full/clamp-16/20260201-065209"
     # "ours_full/clamp-20/20260201-063324"
     # "ours_full/clamp-24/20260201-064936"
     # "ours_full/clamp-28/20260201-064337"
+
+    "ours_psnr/hinge-hard-noise-target-0.1/20260222-122031"
 )
 
 base_prefix="/mnt/nas5/suhyeon/projects/eval_spliceless"
@@ -42,5 +44,5 @@ do
         eval_size=256 \
         start_idx=0 \
         end_idx=100 \
-        tamper_mode=zero_mask
+        tamper_mode=ldm
 done

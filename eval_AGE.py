@@ -580,7 +580,8 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                 spliceless_image_pil = Image.fromarray(spliceless_image)
 
                 # save cover and edited images as PNG (replace .jpg extension if present)
-                cover_image_pil.save(os.path.join(save_path, 'cover_images', save_file_name.replace("jpg", "png")))
+                if target_model != 'ours':
+                    cover_image_pil.save(os.path.join(save_path, 'cover_images', save_file_name.replace("jpg", "png")))
                 spliced_image_pil.save(os.path.join(save_path, 'ldm_spliced_images', save_file_name.replace("jpg", "png")))
                 spliceless_image_pil.save(os.path.join(save_path, 'ldm_spliceless_images', save_file_name.replace("jpg", "png")))
 
