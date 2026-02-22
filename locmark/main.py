@@ -59,7 +59,7 @@ class Params:
         self.target_cossim = 0.1
 
         # --- Optimization Parameters ---
-        self.lr = 2.0
+        self.lr = 1.0
         self.steps = 150
         self.lambda_p = 0.1 #0.1 #0.05 #0.025
         self.lambda_i = 0.05 #0.05 #0.01 #0.005
