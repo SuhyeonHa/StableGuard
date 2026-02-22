@@ -2,8 +2,8 @@ src_image_path: "/mnt/nas5/suhyeon/datasets/valAGE-Set"
 edit_model_name: "sd-legacy/stable-diffusion-inpainting"
 seed: 42
 eval_size: 256
-target_model: "omniguard" # ["omniguard", "wam", "stableguard]
-save_path: "/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/512_valAGE_sd"
+target_model: "ours_e2e" # ["omniguard", "wam", "stableguard", "ours", "ours_e2e"]
+save_path: "/mnt/nas5/suhyeon/projects/eval_spliceless/ours_e2e/locmark-e2e"
 start_idx: 0
 end_idx: 100
 aug_type: null
@@ -15,24 +15,28 @@ weight_paths:
   wam: "/mnt/nas5/suhyeon/checkpoints/wam/"
   stableguard: "/mnt/nas5/suhyeon/checkpoints/stableguard/weights/clean"
   ours: ""
+  ours_e2e: "/mnt/nas5/suhyeon/projects/watermark-anything/locmark-e2e-nopd-noaug-smooth-a2"
 
 normalization: # related to their own embedder
   omniguard: "rescale"
-  wam: "imagenet" # TODO: try "imagenet"
+  wam: "imagenet"
   stableguard: "rescale"
   ours: "rescale" # doesn't matter
+  ours_e2e: "imagenet" # embedder/detector both use ImageNet normalization
 
 num_bits:
   omniguard: 64
   wam: 32
   stableguard: 48
   ours: 0
+  ours_e2e: 0
 
 train_img_size:
   omniguard: 512
   wam: 256
   stableguard: 256
   ours: 256
+  ours_e2e: 256
 
 # Watermark strength (shared across models)
 # WAM default: 2.0, OmniGuard default: 1.0

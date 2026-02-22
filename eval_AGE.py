@@ -1,6 +1,9 @@
 import os
 import warnings
 
+import locmark_e2e  # path setup — must come before any watermark_anything import
+from locmark_e2e.load_checkpoint import load_locmark_checkpoint
+
 from watermark_anything.modules import common
 # Suppress warnings for cleaner output
 warnings.filterwarnings("ignore")
@@ -26,6 +29,7 @@ import torch.nn.functional as F
 import albumentations as albu
 from watermark_anything.wam_utils import load_model_from_checkpoint
 from watermark_anything.data.metrics import msg_predict_inference
+from watermark_anything.data.transforms import normalize_img, unnormalize_img
 from omniguard.model_invert import Model, init_model
 from omniguard.modules.Unet_common import DWT, IWT
 from omniguard.iml_vit_model import iml_vit_model
@@ -418,6 +422,10 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         net.load_state_dict(network_state_dict)
         print(f"OmniGuard wm_strength: {wm_strength}")
 
+    elif target_model == "ours_e2e":
+        wam_e2e = load_locmark_checkpoint(weight_path)
+        wam_e2e = wam_e2e.cuda().eval()
+
     # prepare dataloader for validation images
     val_dataset = AGEDataset(data_root=src_image_path, norm_type=norm, mode="val", size=eval_size)
     val_dataloader = DataLoader(
@@ -506,6 +514,16 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             cover_images = Image.open(os.path.join(cover_path, image_names[0])).convert("RGB").resize((model_size, model_size))
             cover_images = ToTensor()(cover_images).unsqueeze(0).cuda() # [0, 1]
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
+
+        elif target_model == "ours_e2e":
+            # images: ImageNet-normalized (B,3,H,W) from AGEDataset (norm_type='imagenet')
+            imgs_norm = F.interpolate(images, size=(model_size, model_size), mode='bilinear', align_corners=False)
+            with torch.no_grad():
+                msgs = wam_e2e.get_random_msg(imgs_norm.shape[0]).cuda()
+                delta = wam_e2e.embedder(imgs_norm, msgs)          # (B,3,H,W) ImageNet-norm space
+                imgs_w_norm = wam_e2e.blend(imgs_norm, delta)
+            cover_images = torch.stack([unnormalize_img(img) for img in imgs_w_norm])  # → [0,1]
+            cover_images = cover_images * 2.0 - 1.0                                    # → [-1,1]
 
         # tamper
         if tamper_mode == 'ldm':
@@ -807,6 +825,10 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
         args = Params()
         locmark = LocMark(args=args)
 
+    elif target_model == "ours_e2e":
+        wam_e2e = load_locmark_checkpoint(weight_path)
+        wam_e2e = wam_e2e.cuda().eval()
+
     # bit_acc = []
     file_paths = os.listdir(tamper_image_path)
     image_paths = [f for f in file_paths if f.lower().endswith(valid_exts)]
@@ -952,6 +974,27 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             save_image(pred_mask, os.path.join(save_path, f"pred_mask_{exp_suffix}", image_path), normalize=False, scale_each=False)
             save_image(bin_prediction, os.path.join(save_path, f"pred_bin_mask_{exp_suffix}", image_path), normalize=False, scale_each=False)
 
+        elif target_model == "ours_e2e":
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                normalize_img,  # [0,1] → ImageNet-normalized
+            ])
+            image = transform(image).unsqueeze(0).cuda()  # (1, 3, H, W)
+
+            with torch.no_grad():
+                preds, raw_cos_sim, smooth_cos_sim = wam_e2e.detector(image)   # preds: (B, 1+nbits, H, W) logits
+
+            cos_sim_up = F.interpolate(smooth_cos_sim, size=(model_size, model_size), mode='bilinear', align_corners=False)
+            pred_mask = torch.sigmoid(cos_sim_up * 5.0) # temperature
+            bin_prediction = (pred_mask > 0.5).float()
+
+            save_image(pred_mask,
+                       os.path.join(save_path, f"pred_mask_{exp_suffix}", image_path),
+                       normalize=False, scale_each=False)
+            save_image(bin_prediction,
+                       os.path.join(save_path, f"pred_bin_mask_{exp_suffix}", image_path),
+                       normalize=False, scale_each=False)
+
             # for cossim dist. single.
             # flat_logits = logits.detach().cpu().numpy().flatten()
             # logits_list.extend(flat_logits.tolist())
@@ -1075,8 +1118,8 @@ if __name__ == "__main__":
                             wm_strength=c['wm_strength'])
         # 3) Evaluate predicted masks against ground-truth masks saved in disk
         eva = Evaluation(f"{c['save_path']}/pred_bin_mask_{setting}", f"{c['save_path']}/gt", eval_size=c['eval_size'])
-        if c['target_model'] == 'ours':
-            eva.run(f"{c['save_path']}/pred_mask_{setting}", tampermode=c['tamper_mode'])
+        if c['target_model'] in ('ours', 'ours_e2e'):
+            eva.run(f"{c['save_path']}/pred_mask_{setting}", tamper_mode=c['tamper_mode'])
         else:
             eva.run(f"{c['save_path']}/pred_bin_mask_{setting}", tamper_mode=c['tamper_mode'])
 
