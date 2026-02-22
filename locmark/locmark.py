@@ -300,7 +300,7 @@ class LocMark:
             total_loss.backward()
             optimizer.step()
 
-            if step == 0 or (step+1) % 100 == 0:
+            if step == 0 or (step+1) % 50 == 0:
                 psnr_val = self._compute_psnr(watermarked_image.detach(), image.detach())
                 print(f"Step {step+1}, Loss: {total_loss.item():.4f}, PSNR: {psnr_val:.2f}")
                 print(f"Mask loss: {loss_m.item():.4f}")
