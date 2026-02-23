@@ -311,6 +311,10 @@ class Evaluation_Fidelity(object):
         total_psnr = []
         total_ssim = []
         total_lpips = []
+        transform = T.Compose([
+            T.Resize((self.eval_size, self.eval_size)), # Bilinear
+            T.ToTensor()
+        ])
 
         # list prediction files in prediction directory
         wm_images_path = os.listdir(self.wm_path)
@@ -319,18 +323,25 @@ class Evaluation_Fidelity(object):
         for wm_image_path in tqdm(wm_images_path):
             try:
                 # open watermarked image and corresponding original image
+                # wm_image = Image.open(os.path.join(self.wm_path, wm_image_path)).convert("RGB")
+                # ori_image = Image.open(os.path.join(self.ori_path, wm_image_path)).convert("RGB")
+
+                # ori_image = ori_image.resize((self.eval_size, self.eval_size))
+                # wm_image = wm_image.resize((self.eval_size, self.eval_size))
+
                 wm_image = Image.open(os.path.join(self.wm_path, wm_image_path)).convert("RGB")
                 ori_image = Image.open(os.path.join(self.ori_path, wm_image_path)).convert("RGB")
 
-                ori_image = ori_image.resize((self.eval_size, self.eval_size))
-                wm_image = wm_image.resize((self.eval_size, self.eval_size))
+                wm_tensor = transform(wm_image).unsqueeze(0)
+                ori_tensor = transform(ori_image).unsqueeze(0)  
+
             except Exception:
                 # skip files that cannot be opened / matched
                 continue
 
             # convert PIL images to tensors with shape (1, C, H, W)
-            wm_tensor = T.ToTensor()(wm_image).unsqueeze(0)
-            ori_tensor = T.ToTensor()(ori_image).unsqueeze(0)
+            # wm_tensor = T.ToTensor()(wm_image).unsqueeze(0)
+            # ori_tensor = T.ToTensor()(ori_image).unsqueeze(0)
 
             # resize ground-truth to match predicted mask spatial size if needed
             # ori_tensor = torch.nn.functional.interpolate(ori_tensor, (wm_tensor.size(2), wm_tensor.size(3)))
