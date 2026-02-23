@@ -342,9 +342,9 @@ class LocMark:
             B = dot_products.shape[0]
             H = W = int(dot_products.shape[1] ** 0.5)
             grid = dot_products.view(B, H, W).unsqueeze(0) # [1, 1024, 1] -> [1, 1, 32, 32]
-            grid = F.interpolate(grid, size=self.args.image_size, mode='bilinear', align_corners=False)
+            grid_up = F.interpolate(grid, size=self.args.image_size, mode='bilinear', align_corners=False)
             # scaled_grid = (grid-0.1) * self.args.temperature
-            scaled_grid = grid * self.args.temperature
+            scaled_grid = grid_up * self.args.temperature
             confidence_map = torch.sigmoid(scaled_grid)
             binary_prediction = (confidence_map > 0.5).float()
 

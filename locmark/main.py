@@ -26,9 +26,10 @@ class Params:
     def __init__(self):
         # --- System & Paths ---
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
+        # self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
+        self.train_datasets = '/mnt/nas5/suhyeon/datasets/coco-2017/train2017'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0034.png'
-        self.exp_name = '07-hard'
+        self.exp_name = 'hinge-hard-noise-trainset'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
         self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours_abalation' # NOTE: multi image optimization, exp_name
         # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
@@ -146,6 +147,8 @@ def run_locmark(args=None, save_dir=None):
         os.makedirs(os.path.join(save_dir, "watermark"), exist_ok=True)
         os.makedirs(os.path.join(save_dir, "prediction"), exist_ok=True)
         os.makedirs(os.path.join(save_dir, "bin_prediction"), exist_ok=True)
+
+        all_logits = []
         
         for i in range(args.num_test_images):
             original = test_images[i:i+1].to(args.device)
@@ -170,9 +173,14 @@ def run_locmark(args=None, save_dir=None):
             torchvision.utils.save_image(prediction.cpu(), os.path.join(save_dir, "prediction", filename))
             torchvision.utils.save_image(bin_prediction.cpu(), os.path.join(save_dir, "bin_prediction", filename))
 
+            all_logits.append(logits.cpu())
+
             psnr = locmark._compute_psnr(original, watermarked)
             results[filename] = psnr
 
+    stacked_logits = torch.cat(all_logits, dim=0) # Shape: (100, 1, 32, 32)
+    torch.save(stacked_logits, os.path.join(save_dir, "all_logits.pt"))
+    print(f"Saved all logits. Shape: {stacked_logits.shape}")
 
     # Calculate metrics
     avg_psnr = np.mean(list(results.values()))

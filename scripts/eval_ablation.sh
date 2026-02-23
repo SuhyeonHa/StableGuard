@@ -26,6 +26,15 @@ target_dirs=(
     # "ours_full/clamp-28/20260201-064337"
 
     "ours_psnr/hinge-hard-noise-target-0.1/20260222-122031"
+    # "ours_abalation/00-baseline/20260222-152841"
+    # "ours_abalation/01-noise/20260222-153139"
+    # "ours_abalation/02-noise-hinge/20260222-153450"
+    # "ours_abalation/03-noise-hard/20260222-1535541"
+    # "ours_abalation/04-noise-hinge-hard/20260222-153719"
+    # "ours_abalation/05-hinge/20260222-153712"
+    # "ours_abalation/06-hinge-hard/20260222-153824"
+    # "ours_abalation/07-hard/20260222-154022"
+    
 )
 
 base_prefix="/mnt/nas5/suhyeon/projects/eval_spliceless"

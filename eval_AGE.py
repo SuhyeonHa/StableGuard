@@ -1118,25 +1118,25 @@ if __name__ == "__main__":
     #                          tamper_mode=c['tamper_mode'],
     #                          wm_strength=c['wm_strength'])
 
-    # # # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions    
-    # for setting in eval_setting:
-    #     generate_tamper_mask(weight_path=c['weight_path'],
-    #                         eval_setting=setting,
-    #                         target_model=c['target_model'],
-    #                         save_path=c['save_path'],
-    #                         num_bits=c['num_bits'],
-    #                         model_size=c['model_size'],
-    #                         end_idx=c['end_idx'],
-    #                         aug_type=c['aug_type'],
-    #                         aug_param=c['aug_param'],
-    #                         wm_strength=c['wm_strength'])
-    #     # 3) Evaluate predicted masks against ground-truth masks saved in disk
-    #     eva = Evaluation(f"{c['save_path']}/pred_bin_mask_{setting}", f"{c['save_path']}/gt", eval_size=c['eval_size'])
-    #     if c['target_model'] in ('ours', 'ours_e2e'):
-    #         eva.run(f"{c['save_path']}/pred_mask_{setting}", tamper_mode=c['tamper_mode'])
-    #     else:
-    #         eva.run(f"{c['save_path']}/pred_bin_mask_{setting}", tamper_mode=c['tamper_mode'])
+    # # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions    
+    for setting in eval_setting:
+        generate_tamper_mask(weight_path=c['weight_path'],
+                            eval_setting=setting,
+                            target_model=c['target_model'],
+                            save_path=c['save_path'],
+                            num_bits=c['num_bits'],
+                            model_size=c['model_size'],
+                            end_idx=c['end_idx'],
+                            aug_type=c['aug_type'],
+                            aug_param=c['aug_param'],
+                            wm_strength=c['wm_strength'])
+        # 3) Evaluate predicted masks against ground-truth masks saved in disk
+        eva = Evaluation(f"{c['save_path']}/pred_bin_mask_{setting}", f"{c['save_path']}/gt", eval_size=c['eval_size'])
+        if c['target_model'] in ('ours', 'ours_e2e'):
+            eva.run(f"{c['save_path']}/pred_mask_{setting}", tamper_mode=c['tamper_mode'])
+        else:
+            eva.run(f"{c['save_path']}/pred_bin_mask_{setting}", tamper_mode=c['tamper_mode'])
 
     # # 4) Evaluate fidelity between watermarked and original images
-    eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'])
-    eva_fid.run(f"{c['save_path']}/cover_images")
+    # eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'])
+    # eva_fid.run(f"{c['save_path']}/cover_images")
