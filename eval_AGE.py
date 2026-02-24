@@ -811,6 +811,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
     # make output folder for predicted masks
     os.makedirs(os.path.join(save_path, f"pred_mask_{exp_suffix}"), exist_ok=True)
     os.makedirs(os.path.join(save_path, f"pred_bin_mask_{exp_suffix}"), exist_ok=True)
+    os.makedirs(os.path.join(save_path, f"cossim_{exp_suffix}"), exist_ok=True)
     # os.makedirs(os.path.join(save_path, f"augmented_image_{exp_suffix}"), exist_ok=True)
     tamper_image_path = os.path.join(save_path, f"{eval_setting}_images")
 
@@ -987,6 +988,9 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             # save predicted mask image to disk
             save_image(pred_mask, os.path.join(save_path, f"pred_mask_{exp_suffix}", image_path), normalize=False, scale_each=False)
             save_image(bin_prediction, os.path.join(save_path, f"pred_bin_mask_{exp_suffix}", image_path), normalize=False, scale_each=False)
+
+            pt_filename = os.path.splitext(image_path)[0] + ".pt"
+            torch.save(logits.cpu(), os.path.join(save_path, f"cossim_{exp_suffix}", pt_filename))
 
         elif target_model == "ours_e2e":
             transform = transforms.Compose([

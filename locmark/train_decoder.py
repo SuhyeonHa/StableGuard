@@ -11,14 +11,58 @@ from pycocotools import mask as maskUtils
 import numpy as np
 import random
 from torchvision.utils import save_image
+import timm
+import torch.nn.functional as F
 
-# from WAM
+# ==========================================
+# 0. COCO Dataloader Utils
+# ==========================================
+
+def snap_mask_to_edge(mask, margin=3):
+    """
+    mask: (H, W) 또는 (C, H, W) 형태의 텐서
+    margin: 확장할 테두리 픽셀 두께 (보통 2~5 픽셀이면 충분함)
+    """
+    # 안쪽(margin 위치)의 픽셀 값을 바깥쪽(0~margin)으로 복사 (논리적 OR 연산 효과)
+    
+    # 상단 테두리
+    mask[..., :margin, :] = torch.max(mask[..., :margin, :], mask[..., margin:margin+1, :])
+    # 하단 테두리
+    mask[..., -margin:, :] = torch.max(mask[..., -margin:, :], mask[..., -margin-1:-margin, :])
+    # 좌측 테두리
+    mask[..., :, :margin] = torch.max(mask[..., :, :margin], mask[..., :, margin:margin+1])
+    # 우측 테두리
+    mask[..., :, -margin:] = torch.max(mask[..., :, -margin:], mask[..., :, -margin-1:-margin])
+    
+    return mask
+
 class CocoImageIDWrapper(CocoDetection):
-    def __init__(self, root, annFile, transform=None, mask_transform=None, random_nb_object=True, max_nb_masks=4, multi_w=False):
+    def __init__(self, root, annFile, transform=None, mask_transform=None, random_nb_object=True, max_nb_masks=4, multi_w=False, min_mask_ratio=0.02):
         super().__init__(root, annFile, transform=transform, target_transform=mask_transform)
         self.random_nb_object = random_nb_object
         self.max_nb_masks = max_nb_masks
         self.multi_w = multi_w
+        self.min_mask_ratio = min_mask_ratio
+
+    def _generate_rectangular_mask(self, h, w):
+        """무작위 크기와 위치의 직사각형 마스크 생성"""
+        rh = random.randint(int(h * 0.1), int(h * 0.5))
+        rw = random.randint(int(w * 0.1), int(w * 0.5))
+
+        if random.random() < 0.25:
+            # 25% 확률로 이미지 가장자리에 붙도록 강제
+            side = random.randint(0, 3)
+            if side == 0:   y1, x1 = 0,      random.randint(0, w - rw)  # top
+            elif side == 1: y1, x1 = h - rh, random.randint(0, w - rw)  # bottom
+            elif side == 2: y1, x1 = random.randint(0, h - rh), 0       # left
+            else:           y1, x1 = random.randint(0, h - rh), w - rw  # right
+        else:
+            y1 = random.randint(0, h - rh)
+            x1 = random.randint(0, w - rw)
+
+        mask = np.zeros((h, w), dtype=np.float32)
+        mask[y1:y1+rh, x1:x1+rw] = 1.0
+        return torch.tensor(mask, dtype=torch.float32)[None, ...]  # (1, H, W)
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, np.ndarray]:
         if not isinstance(index, int):
@@ -26,59 +70,65 @@ class CocoImageIDWrapper(CocoDetection):
 
         id = self.ids[index]
         img = self._load_image(id)
-        mask = self._load_mask(id)
-        if mask is None:
-            return None  # Skip this image if no valid mask is available
+        img_info = self.coco.loadImgs(id)[0]
+        h, w = img_info['height'], img_info['width']
 
-        img, mask = self.transforms(img, mask)
+        mask = None
+        if random.random() < 0.5:
+            # 무작위 직사각형 마스크 생성
+            mask = self._generate_rectangular_mask(h, w)
+        else:
+            # 기존 Unpaired COCO 마스크 로드
+            mask = None
+            while mask is None:
+                random_index = random.randint(0, len(self.ids) - 1)
+                mask = self._load_mask(self.ids[random_index])
+
+        if mask is not None:
+            mask = snap_mask_to_edge(mask, margin=5)
+
+        if self.transforms is not None:
+            img, mask = self.transforms(img, mask)
+
         return img, mask
 
     def _load_mask(self, id):
         anns = self.coco.loadAnns(self.coco.getAnnIds(id))
         if not anns:
-            return None  # Return None if there are no annotations
+            return None  
 
         img_info = self.coco.loadImgs(id)[0]
         original_height = img_info['height']
         original_width = img_info['width']
 
-        # Initialize a list to hold all masks
         masks = []
-        if self.random_nb_object and np.random.rand() < 0.5:
+        if not self.multi_w:
             random.shuffle(anns)
-            anns = anns[:np.random.randint(1, len(anns)+1)]
-        if not(self.multi_w):
-            mask = np.zeros((original_height, original_width), dtype=np.float32)
-            # one mask for all objects
+            min_area = original_height * original_width * self.min_mask_ratio
             for ann in anns:
                 rle = self.coco.annToRLE(ann)
-                m = maskUtils.decode(rle)
-                mask = np.maximum(mask, m)
-            mask = torch.tensor(mask, dtype=torch.float32)
-            return mask[None, ...]  # Add channel dimension
+                m = maskUtils.decode(rle).astype(np.float32)
+                if m.sum() < min_area:
+                    continue
+                return torch.tensor(m, dtype=torch.float32)[None, ...]
+            return None  # 모든 ann이 너무 작음 → while 루프에서 재시도  
         else:
             anns = anns[:self.max_nb_masks]
             for ann in anns:
                 rle = self.coco.annToRLE(ann)
                 m = maskUtils.decode(rle)
                 masks.append(m)
-            # Stack all masks along a new dimension to create a multi-channel mask tensor
             if masks:
                 masks = np.stack(masks, axis=0)
                 masks = torch.tensor(masks, dtype=torch.bool)
-                # Check if the number of masks is less than max_nb_masks
                 if masks.shape[0] < self.max_nb_masks:
-                    # Calculate the number of additional zero masks needed
                     additional_masks_count = self.max_nb_masks - masks.shape[0]
-                    # Create additional zero masks
                     additional_masks = torch.zeros((additional_masks_count, original_height, original_width), dtype=torch.bool)
-                    # Concatenate the original masks with the additional zero masks
                     masks = torch.cat([masks, additional_masks], dim=0)
             else:
-                # Return a tensor of shape (max_nb_masks, height, width) filled with zeros if there are no masks
                 masks = torch.zeros((self.max_nb_masks, original_height, original_width), dtype=torch.bool)
             return masks
-        
+
 def custom_collate(batch: list) -> tuple[torch.Tensor, torch.Tensor]:
     batch = [item for item in batch if item is not None]
     if not batch:
@@ -87,75 +137,93 @@ def custom_collate(batch: list) -> tuple[torch.Tensor, torch.Tensor]:
     images, masks = zip(*batch)
     images = torch.stack(images)
     
-    # Find the maximum number of masks in any single image
     max_masks = max(mask.shape[0] for mask in masks)
     if max_masks == 1:
         masks = torch.stack(masks)
         return images, masks
 
-    
-    # Pad each mask tensor to have 'max_masks' masks and add the inverse mask
-    padded_masks = []
-    for mask in masks:
-        # Calculate the union of all masks in this image
-        union_mask = torch.max(mask, dim=0).values  # Assuming mask is of shape [num_masks, H, W]
-        
-        # Pad the mask tensor to have 'max_masks' masks
-        pad_size = max_masks - mask.shape[0]
-        if pad_size > 0:
-            padded_mask = F.pad(mask, pad=(0, 0, 0, 0, 0, pad_size), mode='constant', value=0)
-        else:
-            padded_mask = mask
-            
-        padded_masks.append(padded_mask)
-    
-    # Stack the padded masks
-    masks = torch.stack(padded_masks)
-    
-    
-    return images, masks
-
 # ==========================================
-# 1. Shallow Decoder 모델
+# 1. Shallow UpDecoder 모델 (32x32 -> 256x256)
 # ==========================================
-class ShallowDecoder(nn.Module):
+class ShallowUpDecoder(nn.Module):
     def __init__(self):
         super().__init__()
-        self.decoder = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, padding=1),
-            nn.BatchNorm2d(16),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(16, 16, kernel_size=3, padding=1),
-            nn.BatchNorm2d(16),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(16, 1, kernel_size=1) 
-        )
+        # Stage 1: 32 -> 64
+        self.up1   = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
+        self.conv1a = nn.Conv2d(1,  32, kernel_size=3, padding=1)
+        self.norm1a = nn.LayerNorm([32, 64, 64])
+        self.conv1b = nn.Conv2d(32, 32, kernel_size=3, padding=1)
+        self.norm1b = nn.LayerNorm([32, 64, 64])
+
+        # Stage 2: 64 -> 256
+        self.up2   = nn.Upsample(scale_factor=4, mode='bilinear', align_corners=False)
+        self.conv2a = nn.Conv2d(32, 16, kernel_size=3, padding=1)
+        self.norm2a = nn.LayerNorm([16, 256, 256])
+        self.conv2b = nn.Conv2d(16, 16, kernel_size=3, padding=1)
+        self.norm2b = nn.LayerNorm([16, 256, 256])
+
+        self.out_conv = nn.Conv2d(16, 1, kernel_size=1)
 
     def forward(self, x):
-        return self.decoder(x)
+        # Skip: preserve absolute cossim values at output resolution
+        h = self.up1(x)
+        h = F.relu(self.norm1a(self.conv1a(h)), inplace=True)
+        h = F.relu(self.norm1b(self.conv1b(h)), inplace=True)
+
+        h = self.up2(h)
+        h = F.relu(self.norm2a(self.conv2a(h)), inplace=True)
+        h = F.relu(self.norm2b(self.conv2b(h)), inplace=True)
+
+        return self.out_conv(h)
+    
+class DiceLoss(nn.Module):
+    def __init__(self, smooth=1.):
+        super().__init__()
+        self.smooth = smooth
+
+    def forward(self, logits, targets):
+        probs = torch.sigmoid(logits)
+        # Class 1 (non-tampered) Dice
+        num1 = 2. * (probs * targets).sum(dim=(1, 2, 3)) + self.smooth
+        den1 = probs.sum(dim=(1, 2, 3)) + targets.sum(dim=(1, 2, 3)) + self.smooth
+        dice1 = (num1 / den1).mean()
+        # Class 0 (tampered) Dice — prevents bias toward dominant background class
+        inv_probs, inv_targets = 1. - probs, 1. - targets
+        num0 = 2. * (inv_probs * inv_targets).sum(dim=(1, 2, 3)) + self.smooth
+        den0 = inv_probs.sum(dim=(1, 2, 3)) + inv_targets.sum(dim=(1, 2, 3)) + self.smooth
+        dice0 = (num0 / den0).mean()
+        return 1. - (dice1 + dice0) / 2.
 
 # ==========================================
-# 2. 합성 Logit 생성 함수
+# 2. 합성 Cossim 생성 (Addition 방식)
 # ==========================================
-def generate_synthetic_logits(masks, device):
-    B, _, H, W = masks.shape
-    
-    bg_mean, bg_std = 0.455, 0.045
-    fg_mean_range = (0.56, 0.61)
-    fg_std = 0.037
+def generate_augmented_cossim(clean_cossim, masks, device, target_cossim=0.1):
+    """
+    Simulates watermarked cossim distribution for both spliced and spliceless cases.
 
-    blurred_masks = TF.gaussian_blur(masks, kernel_size=[7, 7], sigma=[1.5, 1.5])
+    Empirical values (target_cossim=0.1):
+      Spliced:    non-tampered mean=0.074 (0.74tc), gap=0.105 (1.05tc)
+      Spliceless: non-tampered mean=0.043 (0.43tc), gap=0.076 (0.76tc)
 
-    bg_base = torch.full((B, 1, H, W), bg_mean, device=device)
-    fg_means = torch.empty(B, 1, 1, 1, device=device).uniform_(*fg_mean_range)
-    fg_base = torch.full((B, 1, H, W), 1.0, device=device) * fg_means
-    
-    synthetic_logits = bg_base * (1 - blurred_masks) + fg_base * blurred_masks
+    masks: 1=non-tampered (background), 0=tampered (object region)
+    """
+    B, _, H, W = clean_cossim.shape
 
-    noise = torch.randn((B, 1, H, W), device=device) * bg_std
-    synthetic_logits = synthetic_logits + noise
-    
-    return torch.clamp(synthetic_logits, 0.0, 1.0)
+    masks_resized = TF.resize(masks, [H, W], interpolation=TF.InterpolationMode.NEAREST)
+    blurred_masks = TF.gaussian_blur(masks_resized, kernel_size=[5, 5], sigma=[0.5, 0.5])
+
+    # Non-tampered baseline: covers spliceless(0.43tc) ~ spliced(0.74tc)
+    wm_offsets = torch.empty(B, 1, 1, 1, device=device).uniform_(target_cossim * 0.3, target_cossim * 0.9)
+    high_baseline = clean_cossim + wm_offsets
+
+    # Tampered drop: covers spliceless gap(0.76tc) ~ spliced gap(1.05tc)
+    drop_margins = torch.empty(B, 1, 1, 1, device=device).uniform_(target_cossim * 0.7, target_cossim * 1.1)
+    synthetic_tensor = high_baseline - drop_margins * (1.0 - blurred_masks)
+
+    noise = torch.randn((B, 1, H, W), device=device) * 0.03
+    synthetic_tensor = synthetic_tensor + noise
+
+    return torch.clamp(synthetic_tensor, -1.0, 1.0)
 
 # ==========================================
 # 3. 전체 학습 파이프라인
@@ -163,43 +231,64 @@ def generate_synthetic_logits(masks, device):
 def train_framework():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    batch_size = 32
+    batch_size = 64
     epochs = 10
-    lr = 1e-3
+    lr = 3e-4
     img_size = 256
+    feature_dim = 192
 
-    save_dir = "/mnt/nas5/suhyeon/projects/locmark_decoder/0223"
+    save_dir = "/mnt/nas5/suhyeon/projects/locmark_decoder/0224_dilate_0.2"
     os.makedirs(save_dir, exist_ok=True)
 
     train_dir = "/mnt/nas5/suhyeon/datasets/coco-2017/train2017"
     ann_file = "/mnt/nas5/suhyeon/datasets/coco-2017/annotations/instances_train2017.json"
     
-    dummy_transform = T.Compose([T.Resize((img_size, img_size)), T.ToTensor()])
-    mask_transform = T.Compose([T.Resize((img_size, img_size), interpolation=T.InterpolationMode.NEAREST)])
+    image_transform = T.Compose([
+        T.Resize((img_size, img_size)), 
+        T.ToTensor()
+    ])
+    mask_transform = T.Compose([
+        T.Resize((img_size, img_size), interpolation=T.InterpolationMode.NEAREST)
+    ])
     
     dataset = CocoImageIDWrapper(
-        root=train_dir,
-        annFile=ann_file,
-        transform=dummy_transform,
-        mask_transform=mask_transform,
-        random_nb_object=True, 
-        multi_w=False          
+        root=train_dir, annFile=ann_file,
+        transform=image_transform, mask_transform=mask_transform,
+        random_nb_object=False, multi_w=False,
+        min_mask_ratio=0.15
     )
     
     dataloader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=8,
-        pin_memory=True,
-        drop_last=True,
+        dataset, batch_size=batch_size, shuffle=True,
+        num_workers=8, pin_memory=True, drop_last=True,
         collate_fn=custom_collate 
     )
     
-    model = ShallowDecoder().to(device)
-    criterion = nn.BCEWithLogitsLoss()
+    model = ShallowUpDecoder().to(device)
+    pos_weight = torch.tensor([0.3]).to(device)
+    criterion_bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    criterion_dice = DiceLoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
     
+    # Image Encoder & Direction Vectors 로드
+    norm_imagenet = T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
+    direction_vectors_path = f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{feature_dim}.pt'
+    
+    if os.path.exists(direction_vectors_path):
+        direction_vectors = torch.load(direction_vectors_path).to(device)
+    else:
+        print("Warning: direction_vectors.pt not found. Using dummy vectors.")
+        direction_vectors = torch.randn(256, feature_dim).to(device)
+
+    image_encoder = timm.create_model(
+        'convnext_small.dinov3_lvd1689m',
+        pretrained=True,
+        features_only=True
+    ).to(device)
+    image_encoder.eval()
+
+
     model.train()
     for epoch in range(epochs):
         epoch_loss = 0.0
@@ -210,13 +299,32 @@ def train_framework():
                 continue
             
             images = images.to(device)
-            masks = masks.to(device) 
+            masks = (1-masks).to(device) 
             
-            inputs = generate_synthetic_logits(masks, device)
-            
+            # 1. Clean Cossim 추출
+            with torch.no_grad():
+                norm_images = norm_imagenet(images)
+                
+                # Layer 1 추출 (추출 크기가 다를 경우 보정 필요)
+                features = image_encoder(norm_images)[1]
+
+                B, C, H, W = features.shape
+                features_flat = features.permute(0, 2, 3, 1).reshape(B, H * W, C)
+                
+                epsilon = 1e-6
+                features_norm = features_flat / (torch.norm(features_flat, p=2, dim=-1, keepdim=True) + epsilon)
+                dot_products = torch.matmul(features_norm, direction_vectors.T)
+                
+                # dot_products는 [B, H*W, 1] 또는 [B, H*W, num_bits] 형태 가정. 첫 채널 사용.
+                clean_cossim = dot_products[..., 0].view(B, 1, H, W)
+
+            # 2. 마스크 합성 (Spliced/Spliceless 모두 커버)
+            inputs = generate_augmented_cossim(clean_cossim, masks, device, target_cossim=0.1)
+
+            # 3. 모델 업데이트
             optimizer.zero_grad()
             outputs = model(inputs)
-            loss = criterion(outputs, masks)
+            loss = criterion_bce(outputs, masks) + criterion_dice(outputs, masks)
             
             loss.backward()
             optimizer.step()
@@ -225,10 +333,12 @@ def train_framework():
             progress_bar.set_postfix({"loss": loss.item()})
 
             if batch_idx == 0:
-                num_samples = min(4, images.size(0)) # 최대 4개 샘플 시각화
+                num_samples = min(4, images.size(0))
                 
-                inputs_viz = inputs[:num_samples].repeat(1, 3, 1, 1)
-                outputs_viz = torch.sigmoid(outputs[:num_samples]).repeat(1, 3, 1, 1) # Sigmoid 적용
+                inputs_resized = TF.resize(inputs[:num_samples], [img_size, img_size], interpolation=TF.InterpolationMode.NEAREST)
+                inputs_viz = ((inputs_resized + 1.0) / 2.0).repeat(1, 3, 1, 1)
+                
+                outputs_viz = torch.sigmoid(outputs[:num_samples]).repeat(1, 3, 1, 1)
                 gt_viz = masks[:num_samples].repeat(1, 3, 1, 1)
                 
                 grid = torch.cat([images[:num_samples], inputs_viz, outputs_viz, gt_viz], dim=0)
@@ -236,9 +346,9 @@ def train_framework():
                 save_path = os.path.join(save_dir, f"epoch_{epoch+1:03d}.png")
                 save_image(grid, save_path, nrow=num_samples)
             
-        print(f"Epoch [{epoch+1}/{epochs}] Average Loss: {epoch_loss/len(dataloader):.4f}")
-    
-    torch.save(model.state_dict(), "shallow_decoder_weights.pth")
+        scheduler.step()
+        print(f"Epoch [{epoch+1}/{epochs}] Average Loss: {epoch_loss/len(dataloader):.4f}, LR: {scheduler.get_last_lr()[0]:.2e}")
+        torch.save(model.state_dict(), os.path.join(save_dir, f"shallow_refiner_{epoch+1}.pth"))
 
 if __name__ == "__main__":
     train_framework()

@@ -34,7 +34,7 @@ target_dirs=(
     # "ours_abalation/05-hinge/20260222-153712"
     # "ours_abalation/06-hinge-hard/20260222-153824"
     # "ours_abalation/07-hard/20260222-154022"
-    
+    # "ours/20251205-015055"
 )
 
 base_prefix="/mnt/nas5/suhyeon/projects/eval_spliceless"

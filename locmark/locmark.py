@@ -9,6 +9,7 @@ import torch.optim as optim
 import numpy as np
 import lpips
 from .helper import load_images_from_path, norm_imagenet, denorm_imagenet
+from .train_decoder import ShallowUpDecoder
 
 epsilon = 1e-6
 
@@ -27,6 +28,8 @@ class LocMark:
             pretrained=True,
             features_only=True
         ).to(self.args.device)
+        self.mask_refiner = ShallowUpDecoder().to(self.args.device)
+        self.mask_refiner.load_state_dict(torch.load('/mnt/nas5/suhyeon/projects/locmark_decoder/0224_dilate_0.2/shallow_refiner_6-best.pth', map_location=self.args.device))
         # self.feature_upsampler = torch.hub.load('wimmerth/anyup', 'anyup_multi_backbone', use_natten=True).to(self.args.device)
 
         for param in self.image_encoder.parameters():
@@ -325,6 +328,7 @@ class LocMark:
     def decode_watermark(self, watermarked_image: torch.Tensor) -> torch.Tensor:
         watermarked_image = watermarked_image.to(self.args.device)
         smoother = torch.nn.AvgPool2d(kernel_size=3, stride=1, padding=1)
+        self.mask_refiner.eval()
         
         with torch.no_grad():
             watermarked_image = norm_imagenet(watermarked_image) 
@@ -342,10 +346,11 @@ class LocMark:
             B = dot_products.shape[0]
             H = W = int(dot_products.shape[1] ** 0.5)
             grid = dot_products.view(B, H, W).unsqueeze(0) # [1, 1024, 1] -> [1, 1, 32, 32]
-            grid_up = F.interpolate(grid, size=self.args.image_size, mode='bilinear', align_corners=False)
-            # scaled_grid = (grid-0.1) * self.args.temperature
-            scaled_grid = grid_up * self.args.temperature
-            confidence_map = torch.sigmoid(scaled_grid)
+            # grid_up = F.interpolate(grid, size=self.args.image_size, mode='bilinear', align_corners=False)
+            # # scaled_grid = (grid-0.1) * self.args.temperature
+            # scaled_grid = grid_up * self.args.temperature
+            logits = self.mask_refiner(grid)
+            confidence_map = torch.sigmoid(logits)
             binary_prediction = (confidence_map > 0.5).float()
 
         return grid, confidence_map, binary_prediction
