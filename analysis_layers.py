@@ -43,7 +43,7 @@ LAMBDA_P     = 0.05
 # 참고: ε=0.05 → 이론 max PSNR ≈ 26dB, ε=0.03 → ≈ 30dB
 EPSILON      = 32/255
 LAMBDA_CLEAN = 1.0
-NUM_IMAGES   = 5
+NUM_IMAGES   = 100
 CROP_RATIO   = 0.5
 
 TRAIN_DIR    = "/mnt/nas5/suhyeon/datasets/coco-2017/train2017"
