@@ -37,7 +37,7 @@ IMAGE_SIZE   = 256
 VAE_SIZE     = 512
 STEPS        = 50
 LR           = 1.0
-LAMBDA_P     = 0.05
+LAMBDA_P     = 0.01
 # L∞ epsilon: 최종 pixel space clamp 기준 (locmark 동일 방식).
 # 학습 중에는 latent delta에 제약 없음. 최종에만 pixel clamp 적용.
 # 참고: ε=0.05 → 이론 max PSNR ≈ 26dB, ε=0.03 → ≈ 30dB
@@ -47,7 +47,7 @@ NUM_IMAGES   = 100
 CROP_RATIO   = 0.5
 
 TRAIN_DIR    = "/mnt/nas5/suhyeon/datasets/coco-2017/train2017"
-OUT_DIR      = "/mnt/nas5/suhyeon/projects/locmark_motiv_fig/p0.05"
+OUT_DIR      = "/mnt/nas5/suhyeon/projects/locmark_motiv_fig/p0.01"
 CACHE_DIR    = "/mnt/nas5/suhyeon/caches"
 VEC_DIR      = os.path.join(OUT_DIR, "direction_vectors")
 
