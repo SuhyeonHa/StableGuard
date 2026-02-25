@@ -294,13 +294,13 @@ def decode_heatmap(image_01, direction_vec, feat_layer):
 # INPAINT
 # ────────────────────────────────────────────
 
-def inpaint(image_01, mask_01, prompt=""):
+def inpaint(image_01, mask_01, img_idx, prompt=""):
     """mask_01: 1인 부분 inpaint. Returns [1,3,256,256]"""
     image_pil = tensor_to_pil(image_01)
     mask_pil  = tensor_to_pil(mask_01.expand(-1,3,-1,-1))
     image_pil = image_pil.resize((VAE_SIZE, VAE_SIZE), Image.BILINEAR)
     mask_pil  = mask_pil.resize((VAE_SIZE, VAE_SIZE), Image.NEAREST)
-    generator = torch.Generator(device=DEVICE).manual_seed(SEED)
+    generator = torch.Generator(device=DEVICE).manual_seed(SEED + img_idx)
     with torch.no_grad():
         result = pipe(
             prompt=prompt,
@@ -1040,7 +1040,7 @@ def main():
                 regen_img = torch.load(regen_pt_path, map_location=DEVICE, weights_only=False)
             else:
                 print("  [inpaint] FG mask inpaint (FG 새로 생성, BG 유지)...")
-                regen_img = inpaint(wm_img, fg_mask.to(DEVICE), prompt="")
+                regen_img = inpaint(wm_img, fg_mask.to(DEVICE), img_idx, prompt="")
                 torch.save(regen_img.cpu(), regen_pt_path)
                 print(f"  [inpaint] saved: {regen_pt_path}")
             hmap_regen = decode_heatmap(regen_img, dir_vec, layer_idx)
