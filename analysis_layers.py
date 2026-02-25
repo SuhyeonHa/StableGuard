@@ -28,6 +28,8 @@ import matplotlib.cm as cm
 from torchvision import transforms
 from torchvision.utils import save_image
 from glob import glob
+import pickle
+import argparse
 
 # ────────────────────────────────────────────
 # CONFIG
@@ -37,17 +39,18 @@ IMAGE_SIZE   = 256
 VAE_SIZE     = 512
 STEPS        = 50
 LR           = 1.0
-LAMBDA_P     = 0.01
+LAMBDA_P     = 0.025
 # L∞ epsilon: 최종 pixel space clamp 기준 (locmark 동일 방식).
 # 학습 중에는 latent delta에 제약 없음. 최종에만 pixel clamp 적용.
 # 참고: ε=0.05 → 이론 max PSNR ≈ 26dB, ε=0.03 → ≈ 30dB
 EPSILON      = 32/255
 LAMBDA_CLEAN = 1.0
-NUM_IMAGES   = 100
+NUM_IMAGES   = 10
 CROP_RATIO   = 0.5
 
 TRAIN_DIR    = "/mnt/nas5/suhyeon/datasets/coco-2017/train2017"
-OUT_DIR      = "/mnt/nas5/suhyeon/projects/locmark_motiv_fig/p0.01"
+# OUT_DIR      = "/mnt/nas5/suhyeon/projects/locmark_motiv_fig/p0.05"
+OUT_DIR      = "/mnt/nas5/suhyeon/projects/locmark_motiv_fig/p0.025_seed19"
 CACHE_DIR    = "/mnt/nas5/suhyeon/caches"
 VEC_DIR      = os.path.join(OUT_DIR, "direction_vectors")
 
@@ -55,6 +58,15 @@ LAYERS       = [0, 1, 2, 3]
 FEAT_DIMS    = {0: 96, 1: 192, 2: 384, 3: 768}
 FEAT_SPATIAL = {0: 64, 1: 32,  2: 16,  3: 8}
 
+SEED = 19
+
+# ── RUN MODE ────────────────────────────────
+# 'full'         : embed + inpaint + all figures (default)
+# 'avg_only'     : load records.pkl → avg figures only (no model needed)
+# 'summary_only' : load records.pkl → summary figure only (no model needed)
+MODE = 'full'
+RECORDS_PATH     = os.path.join(OUT_DIR, 'records.pkl')
+DELTA_LISTS_PATH = os.path.join(OUT_DIR, 'delta_lists.pkl')
 
 EPS = 1e-6
 
@@ -134,30 +146,31 @@ def get_fg_mask_feat(fg_mask_np, feat_h):
 # ────────────────────────────────────────────
 # MODEL INIT
 # ────────────────────────────────────────────
-print("Loading models...")
+if MODE == 'full':
+    print("Loading models...")
 
-pipe = StableDiffusionInpaintPipeline.from_pretrained(
-    "sd-legacy/stable-diffusion-inpainting",
-    safety_checker=None,
-    cache_dir=CACHE_DIR,
-).to(DEVICE)
-pipe.vae.requires_grad_(False)
-pipe.unet.requires_grad_(False)
-pipe.text_encoder.requires_grad_(False)
-pipe.vae.eval(); pipe.unet.eval(); pipe.text_encoder.eval()
+    pipe = StableDiffusionInpaintPipeline.from_pretrained(
+        "sd-legacy/stable-diffusion-inpainting",
+        safety_checker=None,
+        cache_dir=CACHE_DIR,
+    ).to(DEVICE)
+    pipe.vae.requires_grad_(False)
+    pipe.unet.requires_grad_(False)
+    pipe.text_encoder.requires_grad_(False)
+    pipe.vae.eval(); pipe.unet.eval(); pipe.text_encoder.eval()
 
-image_encoder = timm.create_model(
-    'convnext_small.dinov3_lvd1689m',
-    pretrained=True,
-    features_only=True
-).to(DEVICE)
-image_encoder.eval()
-for p in image_encoder.parameters():
-    p.requires_grad = False
+    image_encoder = timm.create_model(
+        'convnext_small.dinov3_lvd1689m',
+        pretrained=True,
+        features_only=True
+    ).to(DEVICE)
+    image_encoder.eval()
+    for p in image_encoder.parameters():
+        p.requires_grad = False
 
-avg_pool = torch.nn.AvgPool2d(kernel_size=3, stride=1, padding=1).to(DEVICE)
+    avg_pool = torch.nn.AvgPool2d(kernel_size=3, stride=1, padding=1).to(DEVICE)
 
-print("Models loaded.")
+    print("Models loaded.")
 
 # ────────────────────────────────────────────
 # EMBED
@@ -287,6 +300,7 @@ def inpaint(image_01, mask_01, prompt=""):
     mask_pil  = tensor_to_pil(mask_01.expand(-1,3,-1,-1))
     image_pil = image_pil.resize((VAE_SIZE, VAE_SIZE), Image.BILINEAR)
     mask_pil  = mask_pil.resize((VAE_SIZE, VAE_SIZE), Image.NEAREST)
+    generator = torch.Generator(device=DEVICE).manual_seed(SEED)
     with torch.no_grad():
         result = pipe(
             prompt=prompt,
@@ -295,6 +309,7 @@ def inpaint(image_01, mask_01, prompt=""):
             height=VAE_SIZE,
             width=VAE_SIZE,
             num_inference_steps=50,
+            generator=generator,
         ).images[0]
     result_t = transforms.ToTensor()(result).unsqueeze(0)
     result_t = F.interpolate(result_t, size=(IMAGE_SIZE, IMAGE_SIZE),
@@ -447,6 +462,10 @@ def save_average_figure(layer_idx, all_records, fg_mask_np):
     Row 1: FG/BG mean ± std bar | Δcos_sim ± std bar | per-image PSNR
     Row 2: per-image Δcos_sim 추이 | WM vs After scatter | distribution histogram
     """
+    # figure용 records는 최대 5개로 제한
+    MAX_FIG_IMAGES = 5
+    fig_records = all_records[:MAX_FIG_IMAGES]
+
     avg_hmap_orig  = np.mean([r['hmap_orig']  for r in all_records], axis=0)
     avg_hmap_wm    = np.mean([r['hmap_wm']    for r in all_records], axis=0)
     avg_hmap_regen = np.mean([r['hmap_regen'] for r in all_records], axis=0)
@@ -456,21 +475,23 @@ def save_average_figure(layer_idx, all_records, fg_mask_np):
     fg_feat     = get_fg_mask_feat(fg_mask_np, feat_h)
     bg_feat     = ~fg_feat
     fg_feat_map = fg_feat.reshape(feat_h, feat_h).astype(float)
-    n           = len(all_records)
+    n           = len(fig_records)  # figure용 개수 (최대 5)
+    n_all       = len(all_records)  # 통계용 전체 개수
 
+    # 통계용: 전체 이미지
     all_orig  = np.concatenate([r['hmap_orig'].flatten()  for r in all_records])
     all_wm    = np.concatenate([r['hmap_wm'].flatten()    for r in all_records])
     all_regen = np.concatenate([r['hmap_regen'].flatten() for r in all_records])
-    fg_tile   = np.tile(fg_feat, n)
-    bg_tile   = np.tile(bg_feat, n)
+    fg_tile   = np.tile(fg_feat, n_all)
+    bg_tile   = np.tile(bg_feat, n_all)
 
     vmin, vmax = HMAP_VMIN, HMAP_VMAX
 
     fig, axes = plt.subplots(3, 3, figsize=(15, 14))
     fig.suptitle(
-        f"AVERAGE ({n} images) | Layer {layer_idx} | "
+        f"AVERAGE ({n_all} images) | Layer {layer_idx} | "
         f"ε={EPSILON:.4f} | Avg PSNR={avg_psnr:.2f}dB\n"
-        f"FG mask inpaint: FG=새로 생성, BG=유지",
+        f"FG mask inpaint: FG=새로 생성, BG=유지  (per-image plots: first {n})",
         fontsize=13, fontweight='bold'
     )
 
@@ -528,7 +549,7 @@ def save_average_figure(layer_idx, all_records, fg_mask_np):
         ax_r2.text(i, val+offset, f'{val:+.3f}', ha='center', va='bottom',
                    fontsize=10, fontweight='bold')
 
-    psnrs = [r['psnr'] for r in all_records]
+    psnrs = [r['psnr'] for r in fig_records]
     ax_r3 = axes[1,2]
     ax_r3.bar(np.arange(n), psnrs, color='slategray', alpha=0.8)
     ax_r3.axhline(avg_psnr, color='red', linestyle='--', linewidth=1.5,
@@ -540,11 +561,11 @@ def save_average_figure(layer_idx, all_records, fg_mask_np):
     # ── Row 2: per-image Δcos_sim 추이 / scatter / histogram ──
     per_img_delta_fg = [
         (r['hmap_regen'].flatten()[fg_feat] - r['hmap_wm'].flatten()[fg_feat]).mean()
-        for r in all_records
+        for r in fig_records
     ]
     per_img_delta_bg = [
         (r['hmap_regen'].flatten()[bg_feat] - r['hmap_wm'].flatten()[bg_feat]).mean()
-        for r in all_records
+        for r in fig_records
     ]
     x = np.arange(n)
     ax_r4 = axes[2,0]
@@ -582,27 +603,249 @@ def save_average_figure(layer_idx, all_records, fg_mask_np):
     print(f"[avg fig] saved: {save_path}")
 
 
+def _perturb_panels(axes_row0, axes_row1, delta_np, title_prefix):
+    """공통 패널 렌더링: Row0/Row1에 perturbation 분석 내용 채우기."""
+    H, W = delta_np.shape[1], delta_np.shape[2]
+
+    mag_map = np.linalg.norm(delta_np, axis=0)  # [H, W]
+
+    delta_vis = delta_np.transpose(1, 2, 0)
+    delta_vis_norm = (delta_vis - delta_vis.min()) / (delta_vis.max() - delta_vis.min() + 1e-8)
+
+    # Row 0-0: delta RGB
+    axes_row0[0].imshow(delta_vis_norm)
+    axes_row0[0].set_title(f"{title_prefix} Delta RGB (normalized)")
+    axes_row0[0].axis('off')
+
+    # Row 0-1: L2 magnitude map
+    im1 = axes_row0[1].imshow(mag_map, cmap='hot')
+    axes_row0[1].set_title(f"{title_prefix} L2 Magnitude")
+    axes_row0[1].axis('off')
+    plt.colorbar(im1, ax=axes_row0[1], shrink=0.6, orientation='horizontal', pad=0.04)
+
+    # Row 0-2: R/G/B channel histogram
+    for ch, col in zip(range(3), ['red', 'green', 'blue']):
+        axes_row0[2].hist(delta_np[ch].flatten(), bins=60, color=col,
+                          alpha=0.4, density=True, label=f'Ch{ch}')
+    axes_row0[2].axvline(0, color='black', linewidth=1, linestyle='--')
+    axes_row0[2].set_title("R/G/B channel distribution")
+    axes_row0[2].set_xlabel("Delta value"); axes_row0[2].set_ylabel("Density")
+    axes_row0[2].legend(fontsize=9)
+
+    # Row 1-0: magnitude histogram
+    axes_row1[0].hist(mag_map.flatten(), bins=60, color='slategray', alpha=0.7, density=True)
+    axes_row1[0].set_title("L2 magnitude distribution")
+    axes_row1[0].set_xlabel("L2 magnitude"); axes_row1[0].set_ylabel("Density")
+
+    # Row 1-1: FFT log power
+    fft_mag = np.fft.fftshift(np.fft.fft2(mag_map))
+    fft_log = np.log1p(np.abs(fft_mag))
+    im_fft  = axes_row1[1].imshow(fft_log, cmap='inferno')
+    axes_row1[1].set_title("FFT of delta magnitude (log power)")
+    axes_row1[1].axis('off')
+    plt.colorbar(im_fft, ax=axes_row1[1], shrink=0.6, orientation='horizontal', pad=0.04)
+
+    # Row 1-2: Cumulative radial energy
+    cy, cx   = H // 2, W // 2
+    Y, X     = np.ogrid[:H, :W]
+    R_dist   = np.sqrt((X - cx)**2 + (Y - cy)**2).astype(int)
+    power    = np.abs(fft_mag)**2
+    max_r    = min(cy, cx)
+    radii    = np.arange(max_r)
+    radial_e = np.array([power[R_dist == r].sum() for r in radii])
+    cum_e    = np.cumsum(radial_e) / (radial_e.sum() + 1e-8)
+    axes_row1[2].plot(radii, cum_e, color='darkorange', linewidth=2)
+    axes_row1[2].axhline(0.9, color='gray', linestyle='--', linewidth=1, label='90% energy')
+    axes_row1[2].set_title("Cumulative FFT energy (radial)")
+    axes_row1[2].set_xlabel("Frequency radius (px)"); axes_row1[2].set_ylabel("Cumulative energy")
+    axes_row1[2].legend(fontsize=9); axes_row1[2].grid(alpha=0.3)
+
+
+def save_perturbation_figure(img_idx, layer_idx, orig, wm_img, regen_img, delta, fg_mask_np):
+    """
+    Per-image, per-layer perturbation + regen 변화 분석 figure. (4×3 grid)
+
+    Row 0: delta_orig RGB    | delta_orig L2 mag       | R/G/B histogram
+    Row 1: mag histogram     | FFT log power            | Cumulative FFT energy
+    Row 2: delta_after RGB   | delta_after L2 mag       | survival map (delta_after/delta_orig)
+    Row 3: delta_loss RGB    | delta_loss L2 mag        | FG/BG survival mean bar
+
+    delta_orig  = wm   - orig   (심은 perturbation)
+    delta_after = regen - orig  (inpaint 후 남은 perturbation)
+    survival    = ||delta_after|| / (||delta_orig|| + eps)  pixel-level
+    delta_loss  = delta_orig - delta_after  (사라진 perturbation)
+    """
+    orig_np  = orig.squeeze(0).cpu().numpy()        # [3, H, W]
+    delta_np = delta.squeeze(0).cpu().numpy()        # [3, H, W]  delta_orig
+    regen_np = regen_img.squeeze(0).cpu().numpy()    # [3, H, W]
+
+    delta_after_np = regen_np - orig_np              # [3, H, W]
+    delta_loss_np  = delta_np - delta_after_np       # [3, H, W]
+
+    H, W = delta_np.shape[1], delta_np.shape[2]
+
+    mag_orig  = np.linalg.norm(delta_np,       axis=0)  # [H, W]
+    mag_after = np.linalg.norm(delta_after_np, axis=0)
+    mag_loss  = np.linalg.norm(delta_loss_np,  axis=0)
+    survival  = mag_after / (mag_orig + 1e-8)            # [H, W]  pixel-level
+
+    # fg_mask를 image 해상도로 resize
+    fg_img    = np.array(
+        Image.fromarray((fg_mask_np * 255).astype(np.uint8)).resize((W, H), Image.NEAREST)
+    ) / 255.0
+    fg_bool   = fg_img > 0.5
+
+    def norm_vis(arr3hw):
+        v = arr3hw.transpose(1, 2, 0)
+        return (v - v.min()) / (v.max() - v.min() + 1e-8)
+
+    fig, axes = plt.subplots(4, 3, figsize=(15, 18))
+    fig.suptitle(
+        f"Perturbation & Survival Analysis | Image {img_idx} | Layer {layer_idx} | ε={EPSILON:.4f}",
+        fontsize=13, fontweight='bold'
+    )
+
+    # ── Row 0 / Row 1: delta_orig (기존 _perturb_panels) ──
+    _perturb_panels(axes[0], axes[1], delta_np, title_prefix="Orig")
+
+    # ── Row 2: delta_after ──
+    axes[2,0].imshow(norm_vis(delta_after_np))
+    axes[2,0].set_title("delta_after RGB  (regen − orig, normalized)")
+    axes[2,0].axis('off')
+    axes[2,0].contour(fg_img, levels=[0.5], colors='red', linewidths=1.5)
+
+    im_a = axes[2,1].imshow(mag_after, cmap='hot')
+    axes[2,1].set_title("delta_after L2 magnitude")
+    axes[2,1].axis('off')
+    axes[2,1].contour(fg_img, levels=[0.5], colors='cyan', linewidths=1.5)
+    plt.colorbar(im_a, ax=axes[2,1], shrink=0.6, orientation='horizontal', pad=0.04)
+
+    # survival map: 0=완전소실(파랑), 1=완전보존(빨강)
+    im_s = axes[2,2].imshow(survival, cmap='RdBu_r', vmin=0, vmax=2)
+    axes[2,2].set_title("Survival map  ||delta_after|| / ||delta_orig||\n"
+                         "Red=preserved, Blue=lost")
+    axes[2,2].axis('off')
+    axes[2,2].contour(fg_img, levels=[0.5], colors='white', linewidths=1.5)
+    plt.colorbar(im_s, ax=axes[2,2], shrink=0.6, orientation='horizontal', pad=0.04)
+
+    # ── Row 3: delta_loss ──
+    axes[3,0].imshow(norm_vis(delta_loss_np))
+    axes[3,0].set_title("delta_loss RGB  (delta_orig − delta_after, normalized)")
+    axes[3,0].axis('off')
+    axes[3,0].contour(fg_img, levels=[0.5], colors='red', linewidths=1.5)
+
+    im_l = axes[3,1].imshow(mag_loss, cmap='hot')
+    axes[3,1].set_title("delta_loss L2 magnitude  (erased perturbation)")
+    axes[3,1].axis('off')
+    axes[3,1].contour(fg_img, levels=[0.5], colors='cyan', linewidths=1.5)
+    plt.colorbar(im_l, ax=axes[3,1], shrink=0.6, orientation='horizontal', pad=0.04)
+
+    # FG/BG survival mean bar
+    fg_surv = survival[fg_bool].mean()
+    bg_surv = survival[~fg_bool].mean()
+    bars = axes[3,2].bar(['FG region', 'BG region'], [fg_surv, bg_surv],
+                          color=['tomato', 'steelblue'], alpha=0.85)
+    axes[3,2].axhline(1.0, color='gray', linestyle='--', linewidth=1, label='survival=1')
+    axes[3,2].set_title(f"Mean pixel survival by region\n"
+                         f"FG={fg_surv:.3f}  BG={bg_surv:.3f}")
+    axes[3,2].set_ylabel("Mean survival rate")
+    axes[3,2].legend(fontsize=9)
+    for bar, val in zip(bars, [fg_surv, bg_surv]):
+        axes[3,2].text(bar.get_x() + bar.get_width()/2, val + 0.01, f'{val:.3f}',
+                       ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+    plt.tight_layout()
+    img_out_dir = os.path.join(OUT_DIR, f"L_{layer_idx}", f"img{img_idx:02d}")
+    save_path   = os.path.join(img_out_dir, f"perturb_analysis_layer{layer_idx}.png")
+    plt.savefig(save_path, dpi=100, bbox_inches='tight')
+    plt.close()
+    print(f"[perturb fig] saved: {save_path}")
+
+
+def save_avg_perturbation_figure(layer_idx, delta_list):
+    """
+    Layer별 average perturbation 분석 figure. (3×3 grid)
+
+    delta_list: list of [3,H,W] numpy arrays (pixel space, 이미지별 delta)
+
+    Row 0: Avg delta RGB | Avg L2 magnitude | Std of L2 magnitude (이미지 간)
+    Row 1: Avg magnitude histogram | FFT of avg magnitude | Cumulative FFT energy
+    Row 2: Per-image mean L2 bar | Avg R/G/B channel histogram | 비어있음(axis off)
+    """
+    deltas  = np.stack(delta_list, axis=0)      # [N, 3, H, W]
+    avg_delta = deltas.mean(axis=0)             # [3, H, W]
+    std_mag   = np.linalg.norm(deltas, axis=1).std(axis=0)  # [H, W]
+    H, W      = avg_delta.shape[1], avg_delta.shape[2]
+    n         = len(delta_list)
+
+    fig, axes = plt.subplots(3, 3, figsize=(15, 13))
+    fig.suptitle(
+        f"Avg Perturbation Analysis | Layer {layer_idx} | ε={EPSILON:.4f} | N={n} images",
+        fontsize=13, fontweight='bold'
+    )
+
+    # Row 0/1: 공통 패널 (avg delta 기준)
+    _perturb_panels(axes[0], axes[1], avg_delta, title_prefix="Avg")
+
+    # Row 0-2 override: Std of magnitude map
+    std_im = axes[0,2].imshow(std_mag, cmap='coolwarm')
+    axes[0,2].set_title("Std of L2 magnitude across images")
+    axes[0,2].axis('off')
+    plt.colorbar(std_im, ax=axes[0,2], shrink=0.6, orientation='horizontal', pad=0.04)
+
+    # Row 2-0: per-image mean L2 bar
+    per_img_means = [np.linalg.norm(d, axis=0).mean() for d in delta_list]
+    axes[2,0].bar(np.arange(n), per_img_means, color='slategray', alpha=0.8)
+    axes[2,0].axhline(np.mean(per_img_means), color='red', linestyle='--',
+                      linewidth=1.5, label=f'avg={np.mean(per_img_means):.4f}')
+    axes[2,0].set_title("Per-image mean L2 magnitude")
+    axes[2,0].set_xlabel("Image index"); axes[2,0].set_ylabel("Mean L2")
+    axes[2,0].legend(fontsize=9)
+
+    # Row 2-1: avg R/G/B histogram (avg delta 기준)
+    for ch, col in zip(range(3), ['red', 'green', 'blue']):
+        axes[2,1].hist(avg_delta[ch].flatten(), bins=60, color=col,
+                       alpha=0.4, density=True, label=f'Ch{ch}')
+    axes[2,1].axvline(0, color='black', linewidth=1, linestyle='--')
+    axes[2,1].set_title("Avg delta R/G/B channel distribution")
+    axes[2,1].set_xlabel("Delta value"); axes[2,1].set_ylabel("Density")
+    axes[2,1].legend(fontsize=9)
+
+    # Row 2-2: unused
+    axes[2,2].axis('off')
+
+    plt.tight_layout()
+    save_path = os.path.join(OUT_DIR, f"avg_perturb_layer{layer_idx}.png")
+    plt.savefig(save_path, dpi=100, bbox_inches='tight')
+    plt.close()
+    print(f"[avg perturb fig] saved: {save_path}")
+
+
 def save_summary_figure(records, fg_mask_np):
     """
-    Perturbation Survival Rate (PSR) per layer, line chart.
-    PSR = (cos_sim_after - cos_sim_orig) / (cos_sim_wm - cos_sim_orig)
-    1.0 = watermark 완전 생존, 0.0 = orig 수준으로 완전 소실
-    FG: Foreground Generation (새로 생성된 영역)
-    BG: Background Regeneration (유지된 영역)
-    error band = ±std across images
+    After inpaint 시점에서 FG/BG region의 mean cos_sim + gap line.
+
+    fg_mean = mean_FG(hmap_regen)
+    bg_mean = mean_BG(hmap_regen)
+    gap     = bg_mean - fg_mean  → 클수록 BG가 FG보다 cos_sim 높음 (공간 구분 명확)
+
+    error band = ±std across images (FG/BG only)
     """
     layer_list = sorted(records.keys())
 
     fg_means, fg_stds = [], []
     bg_means, bg_stds = [], []
 
-    DENOM_EPS = 1e-4  # wm - orig 가 너무 작은 patch clamp
+    orig_means, orig_stds = [], []
+    wm_means,   wm_stds   = [], []
 
     for layer_idx in layer_list:
         recs = records[layer_idx]
         if not recs:
-            fg_means.append(0); fg_stds.append(0)
-            bg_means.append(0); bg_stds.append(0)
+            fg_means.append(0);   fg_stds.append(0)
+            bg_means.append(0);   bg_stds.append(0)
+            orig_means.append(0); orig_stds.append(0)
+            wm_means.append(0);   wm_stds.append(0)
             continue
 
         feat_h  = recs[0]['hmap_wm'].shape[0]
@@ -610,57 +853,83 @@ def save_summary_figure(records, fg_mask_np):
         bg_feat = ~fg_feat
 
         per_img_fg, per_img_bg = [], []
+        per_img_orig, per_img_wm = [], []
         for r in recs:
-            orig_f  = r['hmap_orig'].flatten()
-            wm_f    = r['hmap_wm'].flatten()
             regen_f = r['hmap_regen'].flatten()
-            denom   = np.where(np.abs(wm_f - orig_f) < DENOM_EPS, DENOM_EPS, wm_f - orig_f)
-            psr     = (regen_f - orig_f) / denom
+            per_img_fg.append(regen_f[fg_feat].mean())
+            per_img_bg.append(regen_f[bg_feat].mean())
+            per_img_orig.append(r['hmap_orig'].mean())
+            per_img_wm.append(r['hmap_wm'].mean())
 
-            per_img_fg.append(psr[fg_feat].mean())
-            per_img_bg.append(psr[bg_feat].mean())
+        fg_means.append(np.mean(per_img_fg));     fg_stds.append(np.std(per_img_fg))
+        bg_means.append(np.mean(per_img_bg));     bg_stds.append(np.std(per_img_bg))
+        orig_means.append(np.mean(per_img_orig)); orig_stds.append(np.std(per_img_orig))
+        wm_means.append(np.mean(per_img_wm));     wm_stds.append(np.std(per_img_wm))
 
-        fg_means.append(np.mean(per_img_fg));  fg_stds.append(np.std(per_img_fg))
-        bg_means.append(np.mean(per_img_bg));  bg_stds.append(np.std(per_img_bg))
+    fg_means   = np.array(fg_means)
+    bg_means   = np.array(bg_means)
+    fg_stds    = np.array(fg_stds)
+    bg_stds    = np.array(bg_stds)
+    orig_means = np.array(orig_means)
+    orig_stds  = np.array(orig_stds)
+    wm_means   = np.array(wm_means)
+    wm_stds    = np.array(wm_stds)
+    gap_means  = bg_means - fg_means
+    x          = np.arange(len(layer_list))
+    labels     = [f"Layer {l}" for l in layer_list]
 
-    fg_means = np.array(fg_means)
-    bg_means = np.array(bg_means)
-    fg_stds  = np.array(fg_stds)
-    bg_stds  = np.array(bg_stds)
-    x        = np.arange(len(layer_list))
-    labels   = [f"Layer {l}" for l in layer_list]
-
-    fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+    fig, ax = plt.subplots(1, 1, figsize=(10, 6))
     fig.suptitle(
-        f"Perturbation Survival Rate by Layer\n"
-        f"PSR = (after - orig) / (wm - orig)  |  ε={EPSILON:.4f}  |  error band = ±std",
+        f"cos_sim by Layer: Clean / Watermarked / After Inpaint (FG & BG)\n"
+        f"epsilon={EPSILON:.4f}  |  error band = +-std",
         fontsize=12, fontweight='bold'
     )
 
-    # Foreground Generation line
+    # Clean (orig)
+    ax.plot(x, orig_means, color='gray', marker='D', linewidth=1.5,
+            markersize=6, linestyle=':', label='Clean (all)', zorder=2)
+    ax.fill_between(x, orig_means - orig_stds, orig_means + orig_stds,
+                    color='gray', alpha=0.08)
+
+    # Watermarked
+    ax.plot(x, wm_means, color='mediumpurple', marker='D', linewidth=1.5,
+            markersize=6, linestyle=':', label='Watermarked (all)', zorder=2)
+    ax.fill_between(x, wm_means - wm_stds, wm_means + wm_stds,
+                    color='mediumpurple', alpha=0.08)
+    for i, val in enumerate(wm_means):
+        ax.text(i, wm_means[i] + wm_stds[i] + 0.01, f'{val:.3f}',
+                ha='center', va='bottom', fontsize=8, color='mediumpurple')
+
+    # Foreground Generation
     ax.plot(x, fg_means, color='tomato', marker='o', linewidth=2,
             markersize=7, label='Foreground Generation', zorder=3)
     ax.fill_between(x, fg_means - fg_stds, fg_means + fg_stds,
                     color='tomato', alpha=0.15)
     for i, val in enumerate(fg_means):
-        ax.text(i, fg_means[i] + fg_stds[i] + 0.02, f'{val:.3f}',
-                ha='center', va='bottom', fontsize=9, color='tomato', fontweight='bold')
+        ax.text(i, fg_means[i] - fg_stds[i] - 0.02, f'{val:.3f}',
+                ha='center', va='top', fontsize=9, color='tomato', fontweight='bold')
 
-    # Background Regeneration line
+    # Background Regeneration
     ax.plot(x, bg_means, color='steelblue', marker='s', linewidth=2,
             markersize=7, label='Background Regeneration', zorder=3)
     ax.fill_between(x, bg_means - bg_stds, bg_means + bg_stds,
                     color='steelblue', alpha=0.15)
     for i, val in enumerate(bg_means):
-        ax.text(i, bg_means[i] - bg_stds[i] - 0.02, f'{val:.3f}',
-                ha='center', va='top', fontsize=9, color='steelblue', fontweight='bold')
+        ax.text(i, bg_means[i] + bg_stds[i] + 0.02, f'{val:.3f}',
+                ha='center', va='bottom', fontsize=9, color='steelblue', fontweight='bold')
 
-    ax.axhline(1.0, color='gray',  linewidth=1, linestyle='--', alpha=0.6, label='PSR = 1 (perfect)')
-    ax.axhline(0.0, color='black', linewidth=1, linestyle='--', alpha=0.4, label='PSR = 0 (lost)')
+    # BG - FG gap line
+    ax.plot(x, gap_means, color='seagreen', marker='^', linewidth=2,
+            markersize=7, linestyle='--', label='BG - FG Gap', zorder=4)
+    for i, val in enumerate(gap_means):
+        ax.text(i + 0.05, gap_means[i], f'{val:.3f}',
+                ha='left', va='center', fontsize=9, color='seagreen', fontweight='bold')
+
+    ax.axhline(0.0, color='black', linewidth=1, linestyle='--', alpha=0.5)
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
     ax.set_xlabel("Layer")
-    ax.set_ylabel("Perturbation Survival Rate (PSR)")
+    ax.set_ylabel("Mean cos_sim")
     ax.legend(fontsize=10)
     ax.grid(axis='y', linestyle='--', alpha=0.4)
 
@@ -675,20 +944,71 @@ def save_summary_figure(records, fg_mask_np):
 # MAIN
 # ────────────────────────────────────────────
 
+def save_records(records, path):
+    with open(path, 'wb') as f:
+        pickle.dump(records, f)
+    print(f"[records] saved: {path}")
+
+
+def load_records(path):
+    with open(path, 'rb') as f:
+        records = pickle.load(f)
+    print(f"[records] loaded: {path}  "
+          f"(layers={sorted(records.keys())}, "
+          f"n_images={len(next(iter(records.values())))})")
+    return records
+
+
+def save_delta_lists(delta_lists, path):
+    with open(path, 'wb') as f:
+        pickle.dump(delta_lists, f)
+    print(f"[delta_lists] saved: {path}")
+
+
+def load_delta_lists(path):
+    with open(path, 'rb') as f:
+        delta_lists = pickle.load(f)
+    print(f"[delta_lists] loaded: {path}  "
+          f"(layers={sorted(delta_lists.keys())}, "
+          f"n_images={len(next(iter(delta_lists.values())))})")
+    return delta_lists
+
+
 def main():
+    fg_mask    = make_center_crop_mask(IMAGE_SIZE, CROP_RATIO)
+    fg_mask_np = fg_mask.squeeze().numpy()
+
+    # ── avg_only / summary_only: records 로드 후 figure만 생성 ──
+    if MODE in ('avg_only', 'summary_only'):
+        assert os.path.exists(RECORDS_PATH),             f"records.pkl not found: {RECORDS_PATH}\nRun with MODE='full' first."
+        records = load_records(RECORDS_PATH)
+
+        if MODE == 'avg_only':
+            assert os.path.exists(DELTA_LISTS_PATH), \
+                f"delta_lists.pkl not found: {DELTA_LISTS_PATH}\nRun with MODE='full' first."
+            delta_lists = load_delta_lists(DELTA_LISTS_PATH)
+            print("\n=== Saving average figures ===")
+            for layer_idx in sorted(records.keys()):
+                save_average_figure(layer_idx, records[layer_idx], fg_mask_np)
+                save_avg_perturbation_figure(layer_idx, delta_lists[layer_idx])
+
+        elif MODE == 'summary_only':
+            print("\n=== Saving summary figure ===")
+            save_summary_figure(records, fg_mask_np)
+
+        print(f"\n=== Done! Results in: {OUT_DIR} ===")
+        return
+
+    # ── full: embed + inpaint + figures + records 저장 ──
     all_imgs = sorted(glob(os.path.join(TRAIN_DIR, "*.jpg")))
-    random.seed(42)
+    random.seed(SEED)
     selected = random.sample(all_imgs, NUM_IMAGES)
     print(f"Selected {len(selected)} images")
     print(f"L∞ epsilon = {EPSILON} (pixel space, uniform across all layers)")
 
-    fg_mask    = make_center_crop_mask(IMAGE_SIZE, CROP_RATIO)  # FG=1 (inpaint 대상)
-    fg_mask_np = fg_mask.squeeze().numpy()  # [256,256]
-
-    dir_vecs = {layer: generate_direction_vector(FEAT_DIMS[layer], layer) for layer in LAYERS}
-
-    # records[layer] = list of {hmap_wm, hmap_regen, psnr}
-    records = {layer: [] for layer in LAYERS}
+    dir_vecs = {layer: generate_direction_vector(FEAT_DIMS[layer], layer, seed=SEED) for layer in LAYERS}
+    records     = {layer: [] for layer in LAYERS}
+    delta_lists = {layer: [] for layer in LAYERS}  # avg perturb용
 
     for img_idx, img_path in enumerate(selected):
         print(f"\n=== Image {img_idx}/{NUM_IMAGES-1}: {os.path.basename(img_path)} ===")
@@ -703,7 +1023,6 @@ def main():
             os.makedirs(img_out_dir, exist_ok=True)
             save_image(orig, os.path.join(img_out_dir, "orig.png"))
 
-            # Embed (locmark 방식 L∞: latent 최적화 → 최종 pixel clamp)
             wm_tensor_path = os.path.join(img_out_dir, f"wm_tensor_layer{layer_idx}.pt")
             print("  [embed] watermarking...")
             wm_img, delta, psnr_val = embed_watermark(
@@ -715,7 +1034,6 @@ def main():
             hmap_orig = decode_heatmap(orig, dir_vec, layer_idx)
             hmap_wm   = decode_heatmap(wm_img, dir_vec, layer_idx)
 
-            # fg_mask로 inpaint 1회: FG 새로 생성, BG는 watermark 유지된 채로 남음
             regen_pt_path = os.path.join(img_out_dir, f"regen_tensor_layer{layer_idx}.pt")
             if os.path.exists(regen_pt_path):
                 print("  [inpaint] load cached regen tensor...")
@@ -727,7 +1045,6 @@ def main():
                 print(f"  [inpaint] saved: {regen_pt_path}")
             hmap_regen = decode_heatmap(regen_img, dir_vec, layer_idx)
 
-            # 중간 결과 저장
             save_image(wm_img,    os.path.join(img_out_dir, f"wm_layer{layer_idx}.png"))
             save_image(regen_img, os.path.join(img_out_dir, f"fg_inpaint_layer{layer_idx}.png"))
             np.save(os.path.join(img_out_dir, f"hmap_orig_layer{layer_idx}.npy"),   hmap_orig)
@@ -738,6 +1055,8 @@ def main():
                                   orig, wm_img, regen_img, delta, psnr_val,
                                   hmap_orig, hmap_wm, hmap_regen,
                                   fg_mask_np)
+            save_perturbation_figure(img_idx, layer_idx, orig, wm_img, regen_img, delta, fg_mask_np)
+            delta_lists[layer_idx].append(delta.squeeze(0).cpu().numpy())
 
             records[layer_idx].append({
                 'hmap_orig':  hmap_orig,
@@ -753,12 +1072,17 @@ def main():
             print(f"  [result] WM mean={hmap_wm.mean():.4f} | After mean={hmap_regen.mean():.4f}")
             print(f"           FG Δcos_sim={delta_fg:+.4f} | BG Δcos_sim={delta_bg:+.4f}")
 
-    # Average summary (per layer)
+    # records 저장
+    save_records(records, RECORDS_PATH)
+    save_delta_lists(delta_lists, DELTA_LISTS_PATH)
+
+    # Average figures
     print("\n=== Saving average figures ===")
     for layer_idx in LAYERS:
         save_average_figure(layer_idx, records[layer_idx], fg_mask_np)
+        save_avg_perturbation_figure(layer_idx, delta_lists[layer_idx])
 
-    # Summary figure (모든 layer 비교)
+    # Summary figure
     print("\n=== Saving summary figure ===")
     save_summary_figure(records, fg_mask_np)
 
