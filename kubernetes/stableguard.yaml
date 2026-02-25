@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-locmark-analysis-layers-p0.025-seed19
+  name: suhyeon-train-locmark-analysis-layers-p0.02-seed19
 spec:
   template:
     spec:
