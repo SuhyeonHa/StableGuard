@@ -21,5 +21,5 @@ cd "${GIT_REPO}"
 echo "Clone complete."
 
 # python eval_AGE.py
-# python -m locmark.main
-python analysis_layers.py
+python -m locmark.main
+# python analysis_layers.py

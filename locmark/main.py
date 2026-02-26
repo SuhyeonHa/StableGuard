@@ -21,6 +21,17 @@ from tqdm import tqdm
 warnings.filterwarnings('ignore')
 
 
+def set_seed(seed: int = 42):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 class Params:
     """Hyperparameters and configuration settings for LocMark."""
     def __init__(self):
@@ -29,12 +40,12 @@ class Params:
         # self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/coco-2017/train2017'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0034.png'
-        self.exp_name = 'hinge-hard-noise-trainset'
+        self.exp_name = 'hinge-hard-noise-500'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
-        self.output_dir = f'/mnt/nas5/suhyeon/projects/eval_spliceless/ours_abalation' # NOTE: multi image optimization, exp_name
+        self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark_table_1/ours' # NOTE: multi image optimization, exp_name
         # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
         self.single_image_mode = False # NOTE
-        self.num_test_images = 100 # the first n images
+        self.num_test_images = 500 # the first n images
 
         # --- Model Configurations ---
         self.vae_model_name = "stabilityai/stable-diffusion-2-1"
@@ -150,6 +161,7 @@ def run_locmark(args=None, save_dir=None):
         os.makedirs(os.path.join(save_dir, "cossim"), exist_ok=True)
         
         for i in range(args.num_test_images):
+            set_seed(args.seed + i)
             original = test_images[i:i+1].to(args.device)
             filename = filenames[i]
 
@@ -196,6 +208,7 @@ def run_locmark(args=None, save_dir=None):
 
 if __name__ == "__main__":
     args = Params()
+    set_seed(args.seed)
 
     # Create output directory
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
