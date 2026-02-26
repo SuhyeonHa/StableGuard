@@ -1,38 +1,38 @@
 #!/bin/bash
 
 # wam
-CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
+python eval_AGE.py \
     target_model=wam \
     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
-    save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/wam/concept_fig_3.0 \
+    save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/wam \
     edit_model_name=sd-legacy/stable-diffusion-inpainting \
     eval_size=256 \
     start_idx=0 \
-    end_idx=100 \
+    end_idx=500 \
     tamper_mode=ldm \
     wm_strength=3.0
 
-# omniguard
-CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
+# # omniguard
+python eval_AGE.py \
     target_model=omniguard \
     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
-    save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/omniguard/concept_fig_2.0 \
+    save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/omniguard \
     edit_model_name=sd-legacy/stable-diffusion-inpainting \
     eval_size=256 \
     start_idx=0 \
-    end_idx=100 \
+    end_idx=500 \
     tamper_mode=ldm \
     wm_strength=2.0
 
-# stableguard
-CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
+# # stableguard
+python eval_AGE.py \
     target_model=stableguard \
     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
-    save_path=/mnt/nas5/suhyeon/projects/eval_spliceless/stableguard/256_valAGE_sd_1.2_wm_wofilter \
+    save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/stableguard \
     edit_model_name=sd-legacy/stable-diffusion-inpainting \
     eval_size=256 \
     start_idx=0 \
-    end_idx=100 \
+    end_idx=500 \
     tamper_mode=ldm
 
 # # ours
