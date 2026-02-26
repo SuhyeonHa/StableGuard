@@ -38,8 +38,7 @@ class Params:
     def __init__(self):
         # --- System & Paths ---
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        # self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
-        self.train_datasets = '/mnt/nas5/suhyeon/datasets/coco-2017/train2017'
+        self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0034.png'
         self.exp_name = 'hinge-hard-noise-500'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
