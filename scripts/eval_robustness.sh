@@ -4,17 +4,29 @@ NUM_IMG=100
 TAMPER_MODEL=ldm
 
 AUG_TYPES=(
-    "jpeg"           "jpeg"           "jpeg"
-    "brightness"     "brightness"
-    "gaussian_blur"  "gaussian_blur"
-    "gaussian_noise" "gaussian_noise" "gaussian_noise"
+    "brightness"     "brightness" "brightness"     "brightness"
+    "median_filter"  "median_filter"
+    "gaussian_noise" "gaussian_noise"
 )
 AUG_PARAMS=(
-    70   80   90
-    -0.3  0.3
-    3    5
-    9    14   25
+    -0.1  0.1   -0.2  0.2
+    3 5
+    1    4
 )
+
+# AUG_TYPES=(
+#     "jpeg"           "jpeg"           "jpeg"
+#     "brightness"     "brightness"
+#     "gaussian_blur"  "gaussian_blur"
+#     "gaussian_noise" "gaussian_noise" "gaussian_noise"
+# )
+# AUG_PARAMS=(
+#     70   80   90
+#     -0.3  0.3
+#     3    5
+#     9    14   25
+# )
+
 
 for i in "${!AUG_TYPES[@]}"; do
     AUG_TYPE=${AUG_TYPES[$i]}

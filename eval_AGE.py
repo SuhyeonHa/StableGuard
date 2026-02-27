@@ -311,6 +311,72 @@ class Evaluation(object):
         with open(os.path.join(save_path, "record.txt"), "a+") as f:
             f.write(msg)
 
+    def run_blind(self, spliceless_pred_dir: str, save_path: str):
+        """
+        Blind AUC: pool pixel predictions from self.pred_path (spliced) and
+        spliceless_pred_dir (spliceless) with a single global threshold.
+
+        GT for spliced: loaded from self.gt_path (partial mask, 1=tampered).
+        GT for spliceless: all-ones (entire image was regenerated).
+
+        Args:
+            spliceless_pred_dir: path to pred_mask_{mode}_spliceless directory
+            save_path: directory where record.txt lives
+        """
+        from sklearn.metrics import roc_auc_score
+
+        all_preds, all_labels = [], []
+
+        # --- Spliced: GT from self.gt_path ---
+        spliced_files = sorted(os.listdir(self.pred_path))
+        if self.end_idx is not None:
+            spliced_files = spliced_files[:self.end_idx]
+        for fname in tqdm(spliced_files, desc="Blind AUC (spliced)"):
+            try:
+                pred = Image.open(os.path.join(self.pred_path, fname)).convert("L")
+                gt   = Image.open(os.path.join(self.gt_path, fname)).convert("L")
+            except Exception:
+                continue
+            pred = pred.resize((self.eval_size, self.eval_size), resample=Image.BILINEAR)
+            gt   = gt.resize((self.eval_size, self.eval_size), resample=Image.NEAREST)
+            pred_arr = np.array(pred, dtype=np.float32) / 255.0
+            gt_arr   = (np.array(gt,   dtype=np.float32) / 255.0 > 0.5).astype(np.float32)
+            all_preds.append(pred_arr.flatten())
+            all_labels.append(gt_arr.flatten())
+
+        # --- Spliceless: GT is all-ones (entire image was regenerated) ---
+        spliceless_files = sorted(os.listdir(spliceless_pred_dir))
+        if self.end_idx is not None:
+            spliceless_files = spliceless_files[:self.end_idx]
+        for fname in tqdm(spliceless_files, desc="Blind AUC (spliceless)"):
+            try:
+                pred = Image.open(os.path.join(spliceless_pred_dir, fname)).convert("L")
+            except Exception:
+                continue
+            pred = pred.resize((self.eval_size, self.eval_size))
+            pred_arr = np.array(pred, dtype=np.float32) / 255.0
+            all_preds.append(pred_arr.flatten())
+            all_labels.append(np.ones(self.eval_size * self.eval_size, dtype=np.float32))
+
+        all_preds  = np.concatenate(all_preds)
+        all_labels = np.concatenate(all_labels)
+
+        n_pos = int(all_labels.sum())
+        n_neg = len(all_labels) - n_pos
+        if n_pos == 0 or n_neg == 0:
+            msg = f"Blind AUC: UNDEFINED (pos={n_pos}, neg={n_neg})\n"
+        else:
+            auc = roc_auc_score(all_labels, all_preds)
+            n_images = len(spliced_files) + len(spliceless_files)
+            msg = (
+                f"Blind AUC: {auc:.5f} "
+                f"({n_images} images: {len(spliced_files)} spliced + {len(spliceless_files)} spliceless)\n"
+            )
+
+        print(msg)
+        with open(os.path.join(save_path, "record_blind.txt"), "a+") as f:
+            f.write(msg)
+
 class Evaluation_Fidelity(object):
     """
     Evaluation helper that reads original and watermarked images from disk,
@@ -1170,6 +1236,13 @@ if __name__ == "__main__":
         pred_mask_dir = f"{c['save_path']}/pred_mask_{setting}{aug_suffix}{refiner_tag}"
         eva = Evaluation(pred_mask_dir, f"{c['save_path']}/gt", eval_size=c['eval_size'], end_idx=c['end_idx'])
         eva.run(pred_mask_dir, tamper_mode=c['tamper_mode'])
+
+    # Blind AUC: pool spliced + spliceless, same threshold, type unknown
+    if len(eval_setting) == 2:
+        spliced_pred_dir    = f"{c['save_path']}/pred_mask_{eval_setting[0]}{aug_suffix}{refiner_tag}"
+        spliceless_pred_dir = f"{c['save_path']}/pred_mask_{eval_setting[1]}{aug_suffix}{refiner_tag}"
+        eva_blind = Evaluation(spliced_pred_dir, f"{c['save_path']}/gt", eval_size=c['eval_size'], end_idx=c['end_idx'])
+        eva_blind.run_blind(spliceless_pred_dir, save_path=c['save_path'])
 
     # 4) Evaluate fidelity between watermarked and original images
     # eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'], end_idx=c['end_idx'])
