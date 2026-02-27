@@ -528,7 +528,8 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             text_encoder_2=text_encoder_2,
             torch_dtype=torch.bfloat16,
             cache_dir='/mnt/nas5/suhyeon/caches/',
-        ).to("cuda")
+        )
+        pipe.enable_model_cpu_offload()
     else:
         original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suhyeon/caches/').to('cuda')
         pipe = StableDiffusionInpaintPipeline.from_pretrained(edit_model_name, cache_dir='/mnt/nas5/suhyeon/caches/', safety_checker=None).to('cuda')
@@ -969,19 +970,19 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
         elif tamper_mode == 'flux':
             # inpaint and splice at 512x512
-            image_512 = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
-            mask_512 = F.interpolate(masks, size=(512, 512), mode='nearest')
+            image_512 = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False).float()
+            mask_512 = F.interpolate(masks, size=(512, 512), mode='nearest').float()
 
-            # tensor [-1,1] → PIL RGB
+            # 2. 텐서 [-1,1] → PIL RGB (float() 추가하여 NumPy 에러 방지)
             inpaint_input_np = (image_512 / 2 + 0.5).clamp(0, 1)
             inpaint_input_np = inpaint_input_np.squeeze(0).cpu().permute(1, 2, 0).numpy()
             inpaint_input_pil = Image.fromarray((inpaint_input_np * 255).astype(np.uint8)).convert('RGB')
 
-            # mask tensor → PIL L (white = inpaint region)
             inpaint_mask_np = mask_512.squeeze(0).squeeze(0).cpu().numpy()
             inpaint_mask_pil = Image.fromarray((inpaint_mask_np * 255).astype(np.uint8)).convert('L')
 
-            generated_images = pipe(
+            # 3. 모델 실행
+            generated_images_pil = pipe(
                 prompt="",
                 image=inpaint_input_pil,
                 mask_image=inpaint_mask_pil,
@@ -989,15 +990,14 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                 width=512,
                 guidance_scale=30,
                 num_inference_steps=50,
-                max_sequence_length=512,
                 generator=torch.Generator("cpu").manual_seed(seed + i)
             ).images[0]
 
-            # PIL → tensor [-1,1]
-            generated_images = ToTensor()(generated_images).cuda()
+            # 4. PIL → tensor [-1,1] 및 타입 통일
+            generated_images = ToTensor()(generated_images_pil).cuda().float()
             generated_images = (generated_images * 2.0 - 1.0).unsqueeze(0)
 
-            # composite at 512x512, then downsample to original size
+            # 5. 합성 (모두 float32/GPU 상태이므로 안전함)
             spliced_images = mask_512 * generated_images + (1 - mask_512) * image_512
             spliceless_images = generated_images
 
