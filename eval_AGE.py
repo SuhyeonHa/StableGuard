@@ -526,7 +526,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         pipe = FluxFillPipeline.from_pretrained(
             "black-forest-labs/FLUX.1-Fill-dev",
             text_encoder_2=text_encoder_2,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             cache_dir='/mnt/nas5/suhyeon/caches/',
         )
         pipe.enable_model_cpu_offload()
@@ -969,20 +969,20 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                 save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
 
         elif tamper_mode == 'flux':
-            # inpaint and splice at 512x512
+            # 입력을 float32로 처리하여 계산 오차와 타입 충돌 방지
             image_512 = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False).float()
             mask_512 = F.interpolate(masks, size=(512, 512), mode='nearest').float()
 
-            # 2. 텐서 [-1,1] → PIL RGB (float() 추가하여 NumPy 에러 방지)
+            # tensor [-1,1] → PIL RGB (float()로 변환하여 numpy 에러 방지)
             inpaint_input_np = (image_512 / 2 + 0.5).clamp(0, 1)
             inpaint_input_np = inpaint_input_np.squeeze(0).cpu().permute(1, 2, 0).numpy()
             inpaint_input_pil = Image.fromarray((inpaint_input_np * 255).astype(np.uint8)).convert('RGB')
 
+            # mask tensor → PIL L
             inpaint_mask_np = mask_512.squeeze(0).squeeze(0).cpu().numpy()
             inpaint_mask_pil = Image.fromarray((inpaint_mask_np * 255).astype(np.uint8)).convert('L')
 
-            # 3. 모델 실행
-            generated_images_pil = pipe(
+            generated_images = pipe(
                 prompt="",
                 image=inpaint_input_pil,
                 mask_image=inpaint_mask_pil,
@@ -990,6 +990,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                 width=512,
                 guidance_scale=30,
                 num_inference_steps=50,
+                # dtype 충돌을 피하기 위해 generator를 명시적으로 설정
                 generator=torch.Generator("cpu").manual_seed(seed + i)
             ).images[0]
 
