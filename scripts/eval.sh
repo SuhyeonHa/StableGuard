@@ -4,7 +4,7 @@ NUM_IMG=100
 TAMPER_MODEL=controlnet
 
 # wam
-CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
+python eval_AGE.py \
     target_model=wam \
     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
     save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/wam \
@@ -16,7 +16,7 @@ CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
     wm_strength=3.0
 
 # # omniguard
-CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
+python eval_AGE.py \
     target_model=omniguard \
     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
     save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/omniguard \
@@ -28,7 +28,7 @@ CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
     wm_strength=2.0
 
 # # # stableguard
-CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
+python eval_AGE.py \
     target_model=stableguard \
     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
     save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/stableguard \
@@ -39,7 +39,7 @@ CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
     tamper_mode=$TAMPER_MODEL
 
 # ours
-CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
+python eval_AGE.py \
     target_model=ours \
     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
     save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858 \
@@ -50,7 +50,7 @@ CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
     tamper_mode=$TAMPER_MODEL \
     use_refiner=False
 
-CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
+python eval_AGE.py \
     target_model=ours \
     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
     save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858 \
