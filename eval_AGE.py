@@ -838,7 +838,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                 image=inpaint_input,
                 mask_image=inpaint_mask,
                 guidance_scale=8.0,
-                num_inference_steps=20,
+                num_inference_steps=50,
                 strength=0.99,
                 generator=generator,
             ).images[0]
