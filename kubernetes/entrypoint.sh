@@ -22,6 +22,9 @@ git clone --branch "${GIT_BRANCH}" "${GIT_REPO_URL}"
 cd "${GIT_REPO}"
 echo "Clone complete."
 
+# packages
+pip install -U bitsandbytes
+
 # python eval_AGE.py
 # python -m locmark.main
 # python analysis_layers.py
