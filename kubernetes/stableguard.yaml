@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-decoder
+  name: suhyeon-train-locmark-aug
 spec:
   template:
     spec:
