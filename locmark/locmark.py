@@ -29,7 +29,8 @@ class LocMark:
             features_only=True
         ).to(self.args.device)
         self.mask_refiner = ShallowUpDecoder().to(self.args.device)
-        self.mask_refiner.load_state_dict(torch.load('/mnt/nas5/suhyeon/projects/locmark_decoder/0224_dilate_0.2/shallow_refiner_6-best.pth', map_location=self.args.device))
+        # self.mask_refiner.load_state_dict(torch.load('/mnt/nas5/suhyeon/projects/locmark_decoder/0224_dilate_0.2/shallow_refiner_6-best.pth', map_location=self.args.device))
+        self.mask_refiner.load_state_dict(torch.load('/mnt/nas5/suhyeon/projects/locmark_decoder/0227_aug/shallow_refiner_15-best.pth', map_location=self.args.device))
         # self.feature_upsampler = torch.hub.load('wimmerth/anyup', 'anyup_multi_backbone', use_natten=True).to(self.args.device)
 
         for param in self.image_encoder.parameters():

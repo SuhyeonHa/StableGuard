@@ -10,6 +10,7 @@ warnings.filterwarnings("ignore")
 from PIL import Image
 from torchvision.transforms import transforms as T
 from tqdm import tqdm
+import cv2
 import numpy as np
 from diffusers import AutoencoderKL, StableDiffusionInpaintPipeline, AutoPipelineForInpainting, FluxFillPipeline
 import torch
@@ -468,7 +469,7 @@ class Evaluation_Fidelity(object):
 
 
 @torch.no_grad()
-def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, seed, num_bits=48, model_size=512, eval_size=256, start_idx=0, end_idx=None, tamper_mode='inpaint', wm_strength=None):
+def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, seed, num_bits=48, model_size=512, eval_size=256, start_idx=0, end_idx=None, tamper_mode='inpaint', wm_strength=None, brushnet_checkpoint_dir=None):
     # create output subdirectories
     res = []
     if tamper_mode == 'ldm':
@@ -485,6 +486,8 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         res = ['sdxl_spliced_images', 'sdxl_spliceless_images']
     elif tamper_mode == 'flux':
         res = ['flux_spliced_images', 'flux_spliceless_images']
+    elif tamper_mode == 'brushnet':
+        res = ['brushnet_spliced_images', 'brushnet_spliceless_images']
     for n in res:
         os.makedirs(os.path.join(save_path, '%s' % n), exist_ok=True)
 
@@ -530,6 +533,38 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             cache_dir='/mnt/nas5/suhyeon/caches/',
         )
         pipe.enable_model_cpu_offload()
+    elif tamper_mode == 'brushnet':
+        _bn_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "BrushNet", "src")
+        # BrushNet requires its own modified diffusers (UNet with down_block_add_samples).
+        # Swap sys.modules so BrushNet's diffusers is active for the ENTIRE load phase,
+        # then restore installed diffusers afterwards.
+        _saved_mods = {k: v for k, v in sys.modules.items() if k == 'diffusers' or k.startswith('diffusers.')}
+        for k in list(_saved_mods.keys()):
+            del sys.modules[k]
+        sys.path.insert(0, _bn_src)
+
+        from diffusers import StableDiffusionBrushNetPipeline, BrushNetModel, UniPCMultistepScheduler
+
+        _bn_ckpt = os.path.abspath(brushnet_checkpoint_dir)
+        _bn_dtype = torch.float16
+
+        brushnet_model = BrushNetModel.from_pretrained(_bn_ckpt, torch_dtype=_bn_dtype)
+        pipe = StableDiffusionBrushNetPipeline.from_pretrained(
+            "runwayml/stable-diffusion-v1-5",
+            brushnet=brushnet_model,
+            torch_dtype=_bn_dtype,
+            safety_checker=None,
+            cache_dir='/mnt/nas5/suhyeon/caches/',
+            low_cpu_mem_usage=False,
+        ).to("cuda")
+        pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
+
+        # Restore installed diffusers after all BrushNet models are loaded
+        for k in [k for k in list(sys.modules.keys()) if k == 'diffusers' or k.startswith('diffusers.')]:
+            del sys.modules[k]
+        sys.path.remove(_bn_src)
+        sys.modules.update(_saved_mods)
+        original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suhyeon/caches/').to('cuda')
     else:
         original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suhyeon/caches/').to('cuda')
         pipe = StableDiffusionInpaintPipeline.from_pretrained(edit_model_name, cache_dir='/mnt/nas5/suhyeon/caches/', safety_checker=None).to('cuda')
@@ -1035,6 +1070,67 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
                 save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
 
+        elif tamper_mode == 'brushnet':
+            image_512 = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False).float()
+            mask_512  = F.interpolate(masks, size=(512, 512), mode='nearest').float()
+
+            # tensor [-1,1] → numpy uint8 (H,W,3)
+            orig_np = (image_512 / 2 + 0.5).clamp(0, 1).squeeze(0).cpu().permute(1, 2, 0).numpy()
+            orig_np_uint8 = (orig_np * 255).astype(np.uint8)
+
+            # mask: (H,W) float [0,1]; 1=tampered=inpaint (matches BrushNet white=inpaint convention)
+            mask_np = mask_512.squeeze(0).squeeze(0).cpu().numpy()
+
+            # Masked input: zero out inpaint region (test_brushnet.py pattern)
+            masked_np = (orig_np * (1 - mask_np[:, :, np.newaxis]) * 255).astype(np.uint8)
+            masked_pil = Image.fromarray(masked_np).convert('RGB')
+
+            # BrushNet mask PIL: white (255)=inpaint, black (0)=keep
+            mask_rgb = np.stack([mask_np * 255] * 3, axis=-1).astype(np.uint8)
+            mask_pil = Image.fromarray(mask_rgb).convert('RGB')
+
+            result_pil = pipe(
+                "",
+                masked_pil,
+                mask_pil,
+                num_inference_steps=50,
+                generator=torch.Generator("cuda").manual_seed(seed + i),
+                brushnet_conditioning_scale=1.0,
+                guidance_scale=7.5,
+            ).images[0]
+
+            # spliceless: raw pipe output (before any blending)
+            spliceless_np = np.array(result_pil)  # (512,512,3) uint8
+
+            # spliced: Gaussian-blur-blend at mask boundary (test_brushnet.py blended pattern)
+            mask_blurred = cv2.GaussianBlur(mask_np * 255, (21, 21), 0) / 255
+            blend_mask = 1 - (1 - mask_np[:, :, np.newaxis]) * (1 - mask_blurred[:, :, np.newaxis])
+            spliced_np = (orig_np_uint8 * (1 - blend_mask) + spliceless_np * blend_mask).astype(np.uint8)
+
+            def _np_to_tensor(arr_uint8):
+                return (torch.from_numpy(arr_uint8).float().permute(2, 0, 1).unsqueeze(0).cuda() / 255.0 * 2.0 - 1.0)
+
+            spliceless_images = _np_to_tensor(spliceless_np)
+            spliced_images    = _np_to_tensor(spliced_np)
+
+            spliced_images    = F.interpolate(spliced_images,    size=(model_size, model_size), mode="bilinear", align_corners=False)
+            spliceless_images = F.interpolate(spliceless_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+
+            for j in range(images.size(0)):
+                save_file_name = image_names[j]
+                mask_j = masks[j].unsqueeze(0)
+
+                def _to_pil(t):
+                    arr = (t / 2 + 0.5).clamp(0, 1).squeeze(0).cpu().numpy().transpose(1, 2, 0)
+                    return Image.fromarray((arr * 255).astype(np.uint8))
+
+                _to_pil(spliced_images[j].unsqueeze(0)).save(
+                    os.path.join(save_path, 'brushnet_spliced_images', save_file_name.replace("jpg", "png")))
+                _to_pil(spliceless_images[j].unsqueeze(0)).save(
+                    os.path.join(save_path, 'brushnet_spliceless_images', save_file_name.replace("jpg", "png")))
+                save_image(1 - mask_j, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")),
+                           normalize=True, scale_each=True)
+
 
 @torch.no_grad()
 def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num_bits=48, model_size=512, end_idx=None, aug_type=None, aug_param=None, wm_strength=None, use_refiner=True):
@@ -1278,6 +1374,8 @@ if __name__ == "__main__":
         eval_setting = ["sdxl_spliced", "sdxl_spliceless"]
     elif c['tamper_mode'] == 'flux':
         eval_setting = ["flux_spliced", "flux_spliceless"]
+    elif c['tamper_mode'] == 'brushnet':
+        eval_setting = ["brushnet_spliced", "brushnet_spliceless"]
     elif c['tamper_mode'] == 'cover':
         eval_setting = ["cover"]
 
@@ -1289,20 +1387,21 @@ if __name__ == "__main__":
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
     save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    generate_watermark_image(norm=c['normalization'],
-                             weight_path=c['weight_path'],
-                             target_model=c['target_model'],
-                             src_image_path=c['src_image_path'],
-                             save_path=c['save_path'],
-                             edit_model_name=c['edit_model_name'],
-                             seed=c['seed'],
-                             num_bits=c['num_bits'],
-                             model_size=c['model_size'],
-                             eval_size=c['eval_size'],
-                             start_idx=c['start_idx'],
-                             end_idx=c['end_idx'],
-                             tamper_mode=c['tamper_mode'],
-                             wm_strength=c['wm_strength'])
+    # generate_watermark_image(norm=c['normalization'],
+    #                          weight_path=c['weight_path'],
+    #                          target_model=c['target_model'],
+    #                          src_image_path=c['src_image_path'],
+    #                          save_path=c['save_path'],
+    #                          edit_model_name=c['edit_model_name'],
+    #                          seed=c['seed'],
+    #                          num_bits=c['num_bits'],
+    #                          model_size=c['model_size'],
+    #                          eval_size=c['eval_size'],
+    #                          start_idx=c['start_idx'],
+    #                          end_idx=c['end_idx'],
+    #                          tamper_mode=c['tamper_mode'],
+    #                          wm_strength=c['wm_strength'],
+    #                          brushnet_checkpoint_dir=c.get('brushnet_checkpoint_dir', None))
 
     # # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     refiner_tag = '_refiner' if (c['target_model'] == 'ours' and c['use_refiner']) else ''
@@ -1325,11 +1424,11 @@ if __name__ == "__main__":
         eva.run(pred_mask_dir, tamper_mode=c['tamper_mode'])
 
     # Blind AUC: pool spliced + spliceless, same threshold, type unknown
-    if len(eval_setting) == 2:
-        spliced_pred_dir    = f"{c['save_path']}/pred_mask_{eval_setting[0]}{aug_suffix}{refiner_tag}"
-        spliceless_pred_dir = f"{c['save_path']}/pred_mask_{eval_setting[1]}{aug_suffix}{refiner_tag}"
-        eva_blind = Evaluation(spliced_pred_dir, f"{c['save_path']}/gt", eval_size=c['eval_size'], end_idx=c['end_idx'])
-        eva_blind.run_blind(spliceless_pred_dir, save_path=c['save_path'])
+    # if len(eval_setting) == 2:
+    #     spliced_pred_dir    = f"{c['save_path']}/pred_mask_{eval_setting[0]}{aug_suffix}{refiner_tag}"
+    #     spliceless_pred_dir = f"{c['save_path']}/pred_mask_{eval_setting[1]}{aug_suffix}{refiner_tag}"
+        # eva_blind = Evaluation(spliced_pred_dir, f"{c['save_path']}/gt", eval_size=c['eval_size'], end_idx=c['end_idx'])
+        # eva_blind.run_blind(spliceless_pred_dir, save_path=c['save_path'])
 
     # 4) Evaluate fidelity between watermarked and original images
     # eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'], end_idx=c['end_idx'])
