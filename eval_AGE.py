@@ -18,6 +18,7 @@ from torchvision.utils import save_image
 from torchvision.transforms import transforms, ToTensor
 from piq import ssim, psnr, LPIPS
 import sys
+from transformers import T5EncoderModel
 
 from evaluation import PixelF1, PixelAUC, PixelIOU, PixelAccuracy
 from dataset import age_collate_fn, AGEDataset
@@ -516,8 +517,15 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             safety_checker=None
         ).to("cuda")
     elif tamper_mode == 'flux':
+        text_encoder_2 = T5EncoderModel.from_pretrained(
+            "black-forest-labs/FLUX.1-Fill-dev",
+            subfolder="text_encoder_2",
+            load_in_8bit=True,
+            device_map="auto"
+        )
         pipe = FluxFillPipeline.from_pretrained(
             "black-forest-labs/FLUX.1-Fill-dev",
+            text_encoder_2=text_encoder_2,
             torch_dtype=torch.bfloat16,
             cache_dir='/mnt/nas5/suhyeon/caches/',
         ).to("cuda")
