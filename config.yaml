@@ -8,7 +8,7 @@ start_idx: 0
 end_idx: 100
 aug_type: null
 aug_param: null
-tamper_mode: "ldm" # ["ldm", "controlnet", "hdpainter", "zero_mask", "vae_regen", "sdxl"]
+tamper_mode: "ldm" # ["ldm", "controlnet", "hdpainter", "zero_mask", "vae_regen", "sdxl", "flux"]
 
 weight_paths:
   omniguard: "/mnt/nas5/suhyeon/checkpoints/omniguard/"
