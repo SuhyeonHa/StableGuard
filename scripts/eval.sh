@@ -1,7 +1,7 @@
 #!/bin/bash
 
 NUM_IMG=100
-TAMPER_MODEL=controlnet
+TAMPER_MODEL=hdpainter
 
 # wam
 python eval_AGE.py \
