@@ -1403,7 +1403,7 @@ if __name__ == "__main__":
     #                          wm_strength=c['wm_strength'],
     #                          brushnet_checkpoint_dir=c.get('brushnet_checkpoint_dir', None))
 
-    # # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
+    # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     refiner_tag = '_refiner' if (c['target_model'] == 'ours' and c['use_refiner']) else ''
     aug_suffix = f"_{c['aug_type']}_{c['aug_param']}" if (c['aug_type'] is not None and c['aug_param'] is not None) else ""
     for setting in eval_setting:
@@ -1422,13 +1422,6 @@ if __name__ == "__main__":
         pred_mask_dir = f"{c['save_path']}/pred_mask_{setting}{aug_suffix}{refiner_tag}"
         eva = Evaluation(pred_mask_dir, f"{c['save_path']}/gt", eval_size=c['eval_size'], end_idx=c['end_idx'])
         eva.run(pred_mask_dir, tamper_mode=c['tamper_mode'])
-
-    # Blind AUC: pool spliced + spliceless, same threshold, type unknown
-    # if len(eval_setting) == 2:
-    #     spliced_pred_dir    = f"{c['save_path']}/pred_mask_{eval_setting[0]}{aug_suffix}{refiner_tag}"
-    #     spliceless_pred_dir = f"{c['save_path']}/pred_mask_{eval_setting[1]}{aug_suffix}{refiner_tag}"
-        # eva_blind = Evaluation(spliced_pred_dir, f"{c['save_path']}/gt", eval_size=c['eval_size'], end_idx=c['end_idx'])
-        # eva_blind.run_blind(spliceless_pred_dir, save_path=c['save_path'])
 
     # 4) Evaluate fidelity between watermarked and original images
     # eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'], end_idx=c['end_idx'])

@@ -15,14 +15,14 @@ TAMPER_MODEL=ldm
 # )
 
 AUG_TYPES=(
-    "jpeg"           "jpeg"           "jpeg"
-    "brightness"     "brightness"
+    # "jpeg"           "jpeg"           "jpeg"
+    # "brightness"     "brightness"
     "gaussian_blur"  "gaussian_blur"
     "gaussian_noise" "gaussian_noise" "gaussian_noise"
 )
 AUG_PARAMS=(
-    70   80   90
-    -0.3  0.3
+    # 70   80   90
+    # -0.3  0.3
     3    5
     9    14   25
 )
@@ -92,17 +92,17 @@ for i in "${!AUG_TYPES[@]}"; do
         aug_param=$AUG_PARAM
 
     # ours (use_refiner=True)
-    python eval_AGE.py \
-        target_model=ours \
-        src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
-        save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858 \
-        edit_model_name=sd-legacy/stable-diffusion-inpainting \
-        eval_size=256 \
-        start_idx=0 \
-        end_idx=$NUM_IMG \
-        tamper_mode=$TAMPER_MODEL \
-        use_refiner=True \
-        aug_type=$AUG_TYPE \
-        aug_param=$AUG_PARAM
+    # python eval_AGE.py \
+    #     target_model=ours \
+    #     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
+    #     save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858 \
+    #     edit_model_name=sd-legacy/stable-diffusion-inpainting \
+    #     eval_size=256 \
+    #     start_idx=0 \
+    #     end_idx=$NUM_IMG \
+    #     tamper_mode=$TAMPER_MODEL \
+    #     use_refiner=True \
+    #     aug_type=$AUG_TYPE \
+    #     aug_param=$AUG_PARAM
 
 done
