@@ -1,15 +1,42 @@
+import io
 import os
 import torch
 from diffusers import StableDiffusionInpaintPipeline
 import timm
 import torch.nn.functional as F
+import torchvision.transforms as transforms
+import torchvision.transforms.functional as TF
 import random
 from tqdm import tqdm
 import torch.optim as optim
 import numpy as np
 import lpips
+from PIL import Image
 from .helper import load_images_from_path, norm_imagenet, denorm_imagenet
 from .train_decoder import ShallowUpDecoder
+
+
+def _jpeg_compress(image: torch.Tensor, quality: int) -> torch.Tensor:
+    """JPEG compress a [0,1] image tensor (3xHxW). Returns same shape."""
+    pil_image = transforms.ToPILImage()(image.clamp(0, 1))
+    buffer = io.BytesIO()
+    pil_image.save(buffer, format='JPEG', quality=quality)
+    buffer.seek(0)
+    return transforms.ToTensor()(Image.open(buffer)).to(image.device)
+
+
+def _jpeg_compress_batch(images: torch.Tensor, quality: int) -> torch.Tensor:
+    """JPEG compress a [0,1] batch tensor (BxCxHxW). Straight-through compatible."""
+    result = torch.stack([_jpeg_compress(images[i], quality) for i in range(images.shape[0])])
+    return result
+
+
+def _median_filter(images: torch.Tensor, kernel_size: int) -> torch.Tensor:
+    """Apply median filter to a [0,1] batch tensor (BxCxHxW)."""
+    padding = kernel_size // 2
+    images_padded = torch.nn.functional.pad(images, (padding, padding, padding, padding))
+    blocks = images_padded.unfold(2, kernel_size, 1).unfold(3, kernel_size, 1)
+    return blocks.median(dim=-1).values.median(dim=-1).values
 
 epsilon = 1e-6
 
@@ -188,18 +215,35 @@ class LocMark:
 
             # masked = watermarked_image * mask + (1 - mask) * image
 
-            # Patch noise injection
+            # Patch noise injection (probabilistic augmentation)
             if is_noise:
-                # uniform noise
-                latent_mask = F.interpolate(original_mask, size=(64, 64), mode="bilinear", align_corners=False)
-                
-                std_val_0 = random.uniform(self.args.eps0_std[0], self.args.eps0_std[1])
-                eps0 = torch.randn_like(perturbed_latent) * std_val_0
+                aug_choice = random.choice(['latent_noise', 'image_noise', 'gaussian_blur', 'jpeg', 'median_filter'])
 
-                perturbed_latent_1 = (perturbed_latent + eps0)*latent_mask + perturbed_latent*(1-latent_mask)
+                if aug_choice == 'latent_noise':
+                    latent_mask = F.interpolate(original_mask, size=(64, 64), mode="bilinear", align_corners=False)
+                    std_val_0 = random.uniform(self.args.eps0_std[0], self.args.eps0_std[1])
+                    eps0 = torch.randn_like(perturbed_latent) * std_val_0
+                    perturbed_latent_1 = (perturbed_latent + eps0) * latent_mask + perturbed_latent * (1 - latent_mask)
+                    watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
+                    watermarked_image_1 = (watermarked_image_1 + 1) / 2
 
-                watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
-                watermarked_image_1 = (watermarked_image_1 + 1) / 2
+                elif aug_choice == 'image_noise':
+                    sigma = random.uniform(self.args.aug_noise_std[0], self.args.aug_noise_std[1])
+                    watermarked_image_1 = (watermarked_image + torch.randn_like(watermarked_image) * sigma).clamp(0, 1)
+
+                elif aug_choice == 'gaussian_blur':
+                    k = random.choice([3, 5, 7])
+                    watermarked_image_1 = TF.gaussian_blur(watermarked_image, kernel_size=k)
+
+                elif aug_choice == 'jpeg':
+                    quality = random.randint(40, 90)
+                    compressed = _jpeg_compress_batch(watermarked_image, quality)
+                    watermarked_image_1 = (compressed - watermarked_image).detach() + watermarked_image
+
+                elif aug_choice == 'median_filter':
+                    k = random.choice([3, 5, 7])
+                    filtered = _median_filter(watermarked_image, k)
+                    watermarked_image_1 = (filtered - watermarked_image).detach() + watermarked_image
 
             # Compute losses
             image = F.interpolate(original, size=(img_size, img_size), mode="bilinear", align_corners=False)
