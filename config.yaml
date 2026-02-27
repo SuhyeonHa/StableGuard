@@ -41,3 +41,6 @@ train_img_size:
 # Watermark strength (shared across models)
 # WAM default: 2.0, OmniGuard default: 1.0
 wm_strength: 1.0
+
+# ours only: use mask_refiner (True) or direct bilinear upsampling (False)
+use_refiner: true

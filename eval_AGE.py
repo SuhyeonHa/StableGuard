@@ -4,7 +4,7 @@ import warnings
 import piq
 
 import locmark_e2e  # path setup — must come before any watermark_anything import
-from locmark_e2e.load_checkpoint import load_locmark_checkpoint
+# from locmark_e2e.load_checkpoint import load_locmark_checkpoint
 
 from watermark_anything.modules import common
 # Suppress warnings for cleaner output
@@ -200,15 +200,17 @@ class Evaluation(object):
     which expose batch_update(predict=..., mask=...) and Cal_FPR(...).
     """
 
-    def __init__(self, pred_path, gt_path, eval_size) -> None:
+    def __init__(self, pred_path, gt_path, eval_size, end_idx=None) -> None:
         """
         Args:
             pred_path (str): directory containing predicted mask images/files.
             gt_path (str): directory containing ground-truth mask images/files.
+            end_idx (int or None): if set, evaluate only the first end_idx sorted files.
         """
         self.pred_path = pred_path
         self.gt_path = gt_path
         self.eval_size = eval_size
+        self.end_idx = end_idx
         # instantiate metric calculators
         self.f1 = PixelF1()
         self.auc = PixelAUC()
@@ -228,9 +230,14 @@ class Evaluation(object):
         total_iou = []
         total_acc = []
         total_fpr = []
+        total_pos_acc = []
+        total_neg_acc = []
+        total_b_acc = []
 
-        # list prediction files in prediction directory
-        pred_images_path = os.listdir(self.pred_path)
+        # list prediction files in prediction directory (sorted for determinism)
+        pred_images_path = sorted(os.listdir(self.pred_path))
+        if self.end_idx is not None:
+            pred_images_path = pred_images_path[:self.end_idx]
 
         # iterate through each predicted mask filename
         for pred_image_path in tqdm(pred_images_path):
@@ -264,6 +271,18 @@ class Evaluation(object):
             acc = self.acc.batch_update(predict=pred_tensor, mask=gt_tensor)
             fpr = self.f1.Cal_FPR(predict=pred_tensor, mask=gt_tensor)
 
+            pred_bin = (pred_tensor > 0.5).float()
+            gt_bin = (gt_tensor > 0.5).float()
+
+            tp = (pred_bin * gt_bin).sum()
+            tn = ((1 - pred_bin) * (1 - gt_bin)).sum()
+            fp = (pred_bin * (1 - gt_bin)).sum()
+            fn = ((1 - pred_bin) * gt_bin).sum()
+
+            pos_acc = tp / (tp + fn + 1e-8)
+            neg_acc = tn / (tn + fp + 1e-8)
+            b_acc = (pos_acc + neg_acc) / 2.0
+
             # append scalars to lists, skipping NaNs
             if not torch.any(torch.isnan(f1)):
                 total_f1.append(f1.item())
@@ -276,8 +295,19 @@ class Evaluation(object):
             if not torch.any(torch.isnan(fpr)):
                 total_fpr.append(fpr.item())
 
+            total_pos_acc.append(pos_acc.item())
+            total_neg_acc.append(neg_acc.item())
+            total_b_acc.append(b_acc.item())
+
         # compute aggregated means and print/write a summary line
-        msg = f"Tampering F1:{np.mean(total_f1):.5f}, AUC:{np.mean(total_auc):.5f}, IoU: {np.mean(total_iou):.5f}, Acc: {np.mean(total_acc):.5f}, FPR: {np.mean(total_fpr):.5f}\n"
+        n_images = len(total_f1)
+        msg = (
+            f"N:{n_images}, "
+            f"Tampering F1:{np.mean(total_f1):.5f}, AUC:{np.mean(total_auc):.5f}, "
+            f"IoU:{np.mean(total_iou):.5f}, Acc:{np.mean(total_acc):.5f}, FPR:{np.mean(total_fpr):.5f}, "
+            f"Pos_Acc:{np.mean(total_pos_acc):.5f}, Neg_Acc:{np.mean(total_neg_acc):.5f}, "
+            f"B_Acc:{np.mean(total_b_acc):.5f}\n"
+        )
         print(msg)
 
         # append to record file under save_path
@@ -290,15 +320,17 @@ class Evaluation_Fidelity(object):
     computes image-similarity metrics (PSNR/SSIM/LPIPS).
     """
 
-    def __init__(self, wm_path, ori_path, eval_size) -> None:
+    def __init__(self, wm_path, ori_path, eval_size, end_idx=None) -> None:
         """
         Args:
             wm_path (str): directory containing watermarked images.
             ori_path (str): directory containing original images.
+            end_idx (int or None): if set, evaluate only the first end_idx sorted files.
         """
         self.wm_path = wm_path
         self.ori_path = ori_path
         self.eval_size = eval_size
+        self.end_idx = end_idx
 
     def run(self, save_path):
         """
@@ -316,8 +348,10 @@ class Evaluation_Fidelity(object):
             T.ToTensor()
         ])
 
-        # list prediction files in prediction directory
-        wm_images_path = os.listdir(self.wm_path)
+        # list prediction files in prediction directory (sorted for determinism)
+        wm_images_path = sorted(os.listdir(self.wm_path))
+        if self.end_idx is not None:
+            wm_images_path = wm_images_path[:self.end_idx]
 
         # iterate through each predicted mask filename
         for wm_image_path in tqdm(wm_images_path):
@@ -360,7 +394,8 @@ class Evaluation_Fidelity(object):
                 total_lpips.append(lpips_value.item())
 
         # compute aggregated means and print/write a summary line
-        msg = f"Tampering PSNR:{np.mean(total_psnr):.5f}, SSIM:{np.mean(total_ssim):.5f}, LPIPS: {np.mean(total_lpips):.5f}\n"
+        n_images = len(total_psnr)
+        msg = f"N:{n_images}, Tampering PSNR:{np.mean(total_psnr):.5f}, SSIM:{np.mean(total_ssim):.5f}, LPIPS: {np.mean(total_lpips):.5f}\n"
         print(msg)
 
         # append to record file under save_path
@@ -803,15 +838,17 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
 
 @torch.no_grad()
-def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num_bits=48, model_size=512, end_idx=None, aug_type=None, aug_param=None, wm_strength=None):
+def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num_bits=48, model_size=512, end_idx=None, aug_type=None, aug_param=None, wm_strength=None, use_refiner=True):
     if aug_type is not None and aug_param is not None:
         exp_suffix = f"{eval_setting}_{aug_type}_{aug_param}"
     else:
         exp_suffix = eval_setting
 
+    refiner_tag = '_refiner' if (target_model == 'ours' and use_refiner) else ''
+
     # make output folder for predicted masks
-    os.makedirs(os.path.join(save_path, f"pred_mask_{exp_suffix}"), exist_ok=True)
-    os.makedirs(os.path.join(save_path, f"pred_bin_mask_{exp_suffix}"), exist_ok=True)
+    os.makedirs(os.path.join(save_path, f"pred_mask_{exp_suffix}{refiner_tag}"), exist_ok=True)
+    os.makedirs(os.path.join(save_path, f"pred_bin_mask_{exp_suffix}{refiner_tag}"), exist_ok=True)
     os.makedirs(os.path.join(save_path, f"cossim_{exp_suffix}"), exist_ok=True)
     # os.makedirs(os.path.join(save_path, f"augmented_image_{exp_suffix}"), exist_ok=True)
     tamper_image_path = os.path.join(save_path, f"{eval_setting}_images")
@@ -984,11 +1021,11 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             # clean = transform(clean).unsqueeze(0)
 
             # run detector on GPU
-            logits, pred_mask, bin_prediction = locmark.decode_watermark(image.cuda())
+            logits, pred_mask, bin_prediction = locmark.decode_watermark(image.cuda(), use_refiner=use_refiner)
 
             # save predicted mask image to disk
-            save_image(pred_mask, os.path.join(save_path, f"pred_mask_{exp_suffix}", image_path), normalize=False, scale_each=False)
-            save_image(bin_prediction, os.path.join(save_path, f"pred_bin_mask_{exp_suffix}", image_path), normalize=False, scale_each=False)
+            save_image(pred_mask, os.path.join(save_path, f"pred_mask_{exp_suffix}{refiner_tag}", image_path), normalize=False, scale_each=False)
+            save_image(bin_prediction, os.path.join(save_path, f"pred_bin_mask_{exp_suffix}{refiner_tag}", image_path), normalize=False, scale_each=False)
 
             pt_filename = os.path.splitext(image_path)[0] + ".pt"
             torch.save(logits.cpu(), os.path.join(save_path, f"cossim_{exp_suffix}", pt_filename))
@@ -1084,6 +1121,7 @@ if __name__ == "__main__":
     c['num_bits'] = c['num_bits'][model_name]
     c['model_size'] = c['train_img_size'][model_name]
     c['wm_strength'] = c.get('wm_strength', None)  # WAM/OmniGuard watermark strength
+    c['use_refiner'] = c.get('use_refiner', True)  # ours: use mask_refiner or direct upsampling
 
     # evaluation settings based on tamper mode
     eval_setting = []
@@ -1108,40 +1146,40 @@ if __name__ == "__main__":
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
     save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    generate_watermark_image(norm=c['normalization'],
-                             weight_path=c['weight_path'],
-                             target_model=c['target_model'],
-                             src_image_path=c['src_image_path'],
-                             save_path=c['save_path'],
-                             edit_model_name=c['edit_model_name'],
-                             seed=c['seed'],
-                             num_bits=c['num_bits'],
-                             model_size=c['model_size'],
-                             eval_size=c['eval_size'],
-                             start_idx=c['start_idx'],
-                             end_idx=c['end_idx'],
-                             tamper_mode=c['tamper_mode'],
-                             wm_strength=c['wm_strength'])
+    # generate_watermark_image(norm=c['normalization'],
+    #                          weight_path=c['weight_path'],
+    #                          target_model=c['target_model'],
+    #                          src_image_path=c['src_image_path'],
+    #                          save_path=c['save_path'],
+    #                          edit_model_name=c['edit_model_name'],
+    #                          seed=c['seed'],
+    #                          num_bits=c['num_bits'],
+    #                          model_size=c['model_size'],
+    #                          eval_size=c['eval_size'],
+    #                          start_idx=c['start_idx'],
+    #                          end_idx=c['end_idx'],
+    #                          tamper_mode=c['tamper_mode'],
+    #                          wm_strength=c['wm_strength'])
 
-    # # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions    
+    # # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
+    refiner_tag = '_refiner' if (c['target_model'] == 'ours' and c['use_refiner']) else ''
     for setting in eval_setting:
-        generate_tamper_mask(weight_path=c['weight_path'],
-                            eval_setting=setting,
-                            target_model=c['target_model'],
-                            save_path=c['save_path'],
-                            num_bits=c['num_bits'],
-                            model_size=c['model_size'],
-                            end_idx=c['end_idx'],
-                            aug_type=c['aug_type'],
-                            aug_param=c['aug_param'],
-                            wm_strength=c['wm_strength'])
+        # generate_tamper_mask(weight_path=c['weight_path'],
+        #                     eval_setting=setting,
+        #                     target_model=c['target_model'],
+        #                     save_path=c['save_path'],
+        #                     num_bits=c['num_bits'],
+        #                     model_size=c['model_size'],
+        #                     end_idx=c['end_idx'],
+        #                     aug_type=c['aug_type'],
+        #                     aug_param=c['aug_param'],
+        #                     wm_strength=c['wm_strength'],
+        #                     use_refiner=c['use_refiner'])
         # 3) Evaluate predicted masks against ground-truth masks saved in disk
-        eva = Evaluation(f"{c['save_path']}/pred_mask_{setting}", f"{c['save_path']}/gt", eval_size=c['eval_size'])
-        # if c['target_model'] in ('ours', 'ours_e2e'):
-        #     eva.run(f"{c['save_path']}/pred_mask_{setting}", tamper_mode=c['tamper_mode'])
-        # else:
-        #     eva.run(f"{c['save_path']}/pred_bin_mask_{setting}", tamper_mode=c['tamper_mode'])
+        pred_mask_dir = f"{c['save_path']}/pred_mask_{setting}{refiner_tag}"
+        eva = Evaluation(pred_mask_dir, f"{c['save_path']}/gt", eval_size=c['eval_size'], end_idx=c['end_idx'])
+        eva.run(pred_mask_dir, tamper_mode=c['tamper_mode'])
 
-    # # 4) Evaluate fidelity between watermarked and original images
-    eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'])
+    # 4) Evaluate fidelity between watermarked and original images
+    eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'], end_idx=c['end_idx'])
     eva_fid.run(f"{c['save_path']}/cover_images")

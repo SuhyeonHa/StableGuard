@@ -325,13 +325,13 @@ class LocMark:
             final_images = torch.clamp(image_512 + final_delta, 0, 1)
         return final_images.detach(), final_delta.detach() 
         
-    def decode_watermark(self, watermarked_image: torch.Tensor) -> torch.Tensor:
+    def decode_watermark(self, watermarked_image: torch.Tensor, use_refiner: bool = True) -> torch.Tensor:
         watermarked_image = watermarked_image.to(self.args.device)
         smoother = torch.nn.AvgPool2d(kernel_size=3, stride=1, padding=1)
         self.mask_refiner.eval()
-        
+
         with torch.no_grad():
-            watermarked_image = norm_imagenet(watermarked_image) 
+            watermarked_image = norm_imagenet(watermarked_image)
             features = self.image_encoder(watermarked_image)[self.args.feat_layer]
             features = smoother(features)
             # features = self.feature_upsampler(watermarked_image, features, q_chunk_size=3)
@@ -346,10 +346,13 @@ class LocMark:
             B = dot_products.shape[0]
             H = W = int(dot_products.shape[1] ** 0.5)
             grid = dot_products.view(B, H, W).unsqueeze(0) # [1, 1024, 1] -> [1, 1, 32, 32]
-            # grid_up = F.interpolate(grid, size=self.args.image_size, mode='bilinear', align_corners=False)
-            # # scaled_grid = (grid-0.1) * self.args.temperature
-            # scaled_grid = grid_up * self.args.temperature
-            logits = self.mask_refiner(grid)
+
+            if use_refiner:
+                logits = self.mask_refiner(grid)
+            else:
+                logits = F.interpolate(grid, size=self.args.image_size, mode='bilinear', align_corners=False)
+                logits = logits * self.args.temperature
+
             confidence_map = torch.sigmoid(logits)
             binary_prediction = (confidence_map > 0.5).float()
 
