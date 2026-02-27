@@ -1,7 +1,7 @@
 import albumentations as A
 
 def get_robustness_transform(aug_type, aug_param, image_size=512):
-    if aug_type is None or aug_type is None:
+    if aug_type is None or aug_param is None:
         return None
 
     transforms_list = []

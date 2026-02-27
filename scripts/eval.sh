@@ -1,7 +1,7 @@
 #!/bin/bash
 
 NUM_IMG=100
-TAMPER_MODEL=sdxl
+TAMPER_MODEL=ldm
 
 # wam
 python eval_AGE.py \
