@@ -1,6 +1,7 @@
 #!/bin/bash
 
 NUM_IMG=100
+TAMPER_MODEL=controlnet
 
 # wam
 CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
@@ -11,7 +12,7 @@ CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
     eval_size=256 \
     start_idx=0 \
     end_idx=$NUM_IMG \
-    tamper_mode=ldm \
+    tamper_mode=$TAMPER_MODEL \
     wm_strength=3.0
 
 # # omniguard
@@ -23,7 +24,7 @@ CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
     eval_size=256 \
     start_idx=0 \
     end_idx=$NUM_IMG \
-    tamper_mode=ldm \
+    tamper_mode=$TAMPER_MODEL \
     wm_strength=2.0
 
 # # # stableguard
@@ -35,7 +36,7 @@ CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
     eval_size=256 \
     start_idx=0 \
     end_idx=$NUM_IMG \
-    tamper_mode=ldm
+    tamper_mode=$TAMPER_MODEL
 
 # ours
 CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
@@ -46,7 +47,7 @@ CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
     eval_size=256 \
     start_idx=0 \
     end_idx=$NUM_IMG \
-    tamper_mode=ldm \
+    tamper_mode=$TAMPER_MODEL \
     use_refiner=False
 
 CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
@@ -57,7 +58,7 @@ CUDA_VISIBLE_DEVICES=3 python eval_AGE.py \
     eval_size=256 \
     start_idx=0 \
     end_idx=$NUM_IMG \
-    tamper_mode=ldm \
+    tamper_mode=$TAMPER_MODEL \
     use_refiner=True
 
 # ours
