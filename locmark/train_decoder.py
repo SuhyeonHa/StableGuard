@@ -264,7 +264,7 @@ def train_framework():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     batch_size = 64
-    epochs = 10
+    epochs = 20
     lr = 3e-4
     img_size = 256
     feature_dim = 192

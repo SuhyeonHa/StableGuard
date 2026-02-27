@@ -28,4 +28,5 @@ pip install -U bitsandbytes
 # python eval_AGE.py
 # python -m locmark.main
 # python analysis_layers.py
-bash scripts/eval.sh
+# bash scripts/eval.sh
+python -m locmark.train_decoder
