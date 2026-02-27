@@ -3,9 +3,6 @@ import warnings
 
 import piq
 
-import locmark_e2e  # path setup — must come before any watermark_anything import
-# from locmark_e2e.load_checkpoint import load_locmark_checkpoint
-
 from watermark_anything.modules import common
 # Suppress warnings for cleaner output
 warnings.filterwarnings("ignore")
@@ -14,7 +11,7 @@ from PIL import Image
 from torchvision.transforms import transforms as T
 from tqdm import tqdm
 import numpy as np
-from diffusers import AutoencoderKL, StableDiffusionInpaintPipeline
+from diffusers import AutoencoderKL, StableDiffusionInpaintPipeline, AutoPipelineForInpainting
 import torch
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
@@ -417,6 +414,8 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         res = ['zero_mask_images', 'zero_mask']
     elif tamper_mode == 'vae_regen':
         res = ['vae_regen_images']
+    elif tamper_mode == 'sdxl':
+        res = ['sdxl_spliced_images', 'sdxl_spliceless_images']
     for n in res:
         os.makedirs(os.path.join(save_path, '%s' % n), exist_ok=True)
 
@@ -440,6 +439,14 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             positive_prompt="Full HD, 4K, high quality, high resolution",
             cache_dir='/mnt/nas5/suhyeon/caches/'
         )
+    elif tamper_mode == 'sdxl':
+        pipe = AutoPipelineForInpainting.from_pretrained(
+            "diffusers/stable-diffusion-xl-1.0-inpainting-0.1",
+            torch_dtype=torch.float16,
+            variant="fp16",
+            cache_dir='/mnt/nas5/suhyeon/caches/',
+            safety_checker=None
+        ).to("cuda")
     else:
         original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suhyeon/caches/').to('cuda')
         pipe = StableDiffusionInpaintPipeline.from_pretrained(edit_model_name, cache_dir='/mnt/nas5/suhyeon/caches/', safety_checker=None).to('cuda')
@@ -467,10 +474,6 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         network_state_dict = {k.removeprefix('module.'):v for k,v in state_dicts['net'].items()}
         net.load_state_dict(network_state_dict)
         print(f"OmniGuard wm_strength: {wm_strength}")
-
-    elif target_model == "ours_e2e":
-        wam_e2e = load_locmark_checkpoint(weight_path)
-        wam_e2e = wam_e2e.cuda().eval()
 
     # prepare dataloader for validation images
     val_dataset = AGEDataset(data_root=src_image_path, norm_type=norm, mode="val", size=eval_size)
@@ -560,16 +563,6 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             cover_images = Image.open(os.path.join(cover_path, image_names[0])).convert("RGB").resize((model_size, model_size))
             cover_images = ToTensor()(cover_images).unsqueeze(0).cuda() # [0, 1]
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
-
-        elif target_model == "ours_e2e":
-            # images: ImageNet-normalized (B,3,H,W) from AGEDataset (norm_type='imagenet')
-            imgs_norm = F.interpolate(images, size=(model_size, model_size), mode='bilinear', align_corners=False)
-            with torch.no_grad():
-                msgs = wam_e2e.get_random_msg(imgs_norm.shape[0]).cuda()
-                delta = wam_e2e.embedder(imgs_norm, msgs)          # (B,3,H,W) ImageNet-norm space
-                imgs_w_norm = wam_e2e.blend(imgs_norm, delta)
-            cover_images = torch.stack([unnormalize_img(img) for img in imgs_w_norm])  # → [0,1]
-            cover_images = cover_images * 2.0 - 1.0                                    # → [-1,1]
 
         # per-image generator: same image index → same seed across different target_models
         generator = torch.Generator().manual_seed(seed + i)
@@ -836,6 +829,61 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
                 generated_image_pil.save(os.path.join(save_path, 'vae_regen_images', save_file_name.replace("jpg", "png")))
 
+        elif tamper_mode == 'sdxl':
+            # inpaint and splice at 1024x1024 (SDXL native resolution)
+            inpaint_input = F.interpolate(cover_images, size=(1024, 1024), mode="bilinear", align_corners=False)
+            inpaint_mask = F.interpolate(masks, size=(1024, 1024), mode="nearest")
+            generated_images = pipe(
+                prompt="",
+                image=inpaint_input,
+                mask_image=inpaint_mask,
+                guidance_scale=8.0,
+                num_inference_steps=20,
+                strength=0.99,
+                generator=generator,
+            ).images[0]
+
+            # pil to tensor, normalize to [-1,1], add batch dim
+            generated_images = ToTensor()(generated_images).cuda()
+            generated_images = (generated_images * 2.0 - 1.0).unsqueeze(0)
+
+            # composite at 1024x1024, then downsample to original size
+            spliced_images = inpaint_mask * generated_images + (1 - inpaint_mask) * inpaint_input  # operation in [-1, 1]
+            spliceless_images = generated_images
+
+            # adjust to each model's training size
+            spliced_images = F.interpolate(spliced_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+            spliceless_images = F.interpolate(spliceless_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+            cover_images = F.interpolate(cover_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+
+            # save per-image outputs
+            for i in range(images.size(0)):
+                save_file_name = image_names[i]
+                spliced_image = spliced_images[i]
+                spliceless_image = spliceless_images[i]
+                mask = masks[i]
+
+                spliced_image = spliced_image.unsqueeze(0)
+                spliceless_image = spliceless_image.unsqueeze(0)
+                mask = mask.unsqueeze(0)
+
+                # spliced image: convert from [-1,1] to [0,255] uint8
+                spliced_image = (spliced_image / 2 + 0.5).clamp(0, 1)
+                spliced_image = spliced_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                spliced_image = (spliced_image * 255).astype(np.uint8)
+                spliced_image_pil = Image.fromarray(spliced_image)
+
+                # spliceless image: same conversion
+                spliceless_image = (spliceless_image / 2 + 0.5).clamp(0, 1)
+                spliceless_image = spliceless_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                spliceless_image = (spliceless_image * 255).astype(np.uint8)
+                spliceless_image_pil = Image.fromarray(spliceless_image)
+
+                spliced_image_pil.save(os.path.join(save_path, 'sdxl_spliced_images', save_file_name.replace("jpg", "png")))
+                spliceless_image_pil.save(os.path.join(save_path, 'sdxl_spliceless_images', save_file_name.replace("jpg", "png")))
+
+                save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+
 
 @torch.no_grad()
 def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num_bits=48, model_size=512, end_idx=None, aug_type=None, aug_param=None, wm_strength=None, use_refiner=True):
@@ -877,10 +925,6 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
     elif target_model == "ours":
         args = Params()
         locmark = LocMark(args=args)
-
-    elif target_model == "ours_e2e":
-        wam_e2e = load_locmark_checkpoint(weight_path)
-        wam_e2e = wam_e2e.cuda().eval()
 
     # bit_acc = []
     file_paths = os.listdir(tamper_image_path)
@@ -1030,62 +1074,6 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             pt_filename = os.path.splitext(image_path)[0] + ".pt"
             torch.save(logits.cpu(), os.path.join(save_path, f"cossim_{exp_suffix}", pt_filename))
 
-        elif target_model == "ours_e2e":
-            transform = transforms.Compose([
-                transforms.ToTensor(),
-                normalize_img,  # [0,1] → ImageNet-normalized
-            ])
-            image = transform(image).unsqueeze(0).cuda()  # (1, 3, H, W)
-
-            with torch.no_grad():
-                preds, raw_cos_sim, smooth_cos_sim = wam_e2e.detector(image)   # preds: (B, 1+nbits, H, W) logits
-
-            cos_sim_up = F.interpolate(smooth_cos_sim, size=(model_size, model_size), mode='bilinear', align_corners=False)
-            pred_mask = torch.sigmoid(cos_sim_up * 5.0) # temperature
-            bin_prediction = (pred_mask > 0.5).float()
-
-            save_image(pred_mask,
-                       os.path.join(save_path, f"pred_mask_{exp_suffix}", image_path),
-                       normalize=False, scale_each=False)
-            save_image(bin_prediction,
-                       os.path.join(save_path, f"pred_bin_mask_{exp_suffix}", image_path),
-                       normalize=False, scale_each=False)
-
-            # for cossim dist. single.
-            # flat_logits = logits.detach().cpu().numpy().flatten()
-            # logits_list.extend(flat_logits.tolist())
-
-            # for figure dist. mask.
-            # mask = transform(mask).unsqueeze(0)
-
-            # flat_logits = logits.squeeze() 
-            # flat_mask = mask.squeeze()
-
-            # mask_inside = (flat_mask == 1)
-            # mask_outside = (flat_mask == 0)
-
-            # inside_vals = flat_logits[mask_inside].detach().cpu().numpy().flatten()
-            # outside_vals = flat_logits[mask_outside].detach().cpu().numpy().flatten()
-            
-            # in_logits_list.extend(inside_vals)
-            # out_logits_list.extend(outside_vals)
-    
-    # single
-    # np.savez_compressed(f"./logits_clean.npz", logits=logits_list)
-
-    # mask
-    # inside_arr = np.array(in_logits_list)
-    # outside_arr = np.array(out_logits_list)
-    # np.savez_compressed(f"./logits_{exp_suffix}_in.npz", logits=inside_arr)
-    # np.savez_compressed(f"./logits_{exp_suffix}_out.npz", logits=outside_arr)
-
-    # write bit accuracy summary to record file (append)
-    # msg = f"Bit Acc:{np.mean(bit_acc):.5f} \n"
-    # msg += "-" * 100 + "\n"
-    # print(msg)
-    # with open(os.path.join(save_path, f"pred_mask_{eval_setting}", "record.txt"), "a+") as f:
-    #     f.write(msg)
-
 def save_and_print_config(config, save_path):
     """
     Save and print the configuration dictionary to a YAML file.
@@ -1135,6 +1123,8 @@ if __name__ == "__main__":
         eval_setting = ["zero_mask"]
     elif c['tamper_mode'] == 'vae_regen':
         eval_setting = ["vae_regen"]
+    elif c['tamper_mode'] == 'sdxl':
+        eval_setting = ["sdxl_spliced", "sdxl_spliceless"]
     elif c['tamper_mode'] == 'cover':
         eval_setting = ["cover"]
 
