@@ -526,7 +526,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         pipe = FluxFillPipeline.from_pretrained(
             "black-forest-labs/FLUX.1-Fill-dev",
             text_encoder_2=text_encoder_2,
-            dtype=torch.float32,
+            dtype=torch.bfloat16,
             cache_dir='/mnt/nas5/suhyeon/caches/',
         )
         pipe.enable_model_cpu_offload()
