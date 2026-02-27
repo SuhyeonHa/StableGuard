@@ -10,8 +10,10 @@ set -e
 GIT_REPO="StableGuard"
 GIT_BRANCH="exp/uni_setup"
 TOKEN_FILE="/mnt/nas5/suhyeon/tokens/github_token.txt"
+HF_TOKEN_FILE="/mnt/nas5/suhyeon/tokens/hf_token.txt"
 
 export GITHUB_TOKEN=$(cat "$TOKEN_FILE")
+export HF_TOKEN=$(cat "$HF_TOKEN_FILE")
 
 GIT_REPO_URL="https://${GITHUB_TOKEN}@github.com/SuhyeonHa/${GIT_REPO}.git"
 

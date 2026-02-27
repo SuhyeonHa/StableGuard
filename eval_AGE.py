@@ -519,7 +519,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         pipe = FluxFillPipeline.from_pretrained(
             "black-forest-labs/FLUX.1-Fill-dev",
             torch_dtype=torch.bfloat16,
-            cache_dir='/mnt/nas5/suhyeon/caches/'
+            cache_dir='/mnt/nas5/suhyeon/caches/',
         ).to("cuda")
     else:
         original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suhyeon/caches/').to('cuda')
