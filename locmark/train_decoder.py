@@ -13,6 +13,7 @@ import random
 from torchvision.utils import save_image
 import timm
 import torch.nn.functional as F
+import albumentations as A
 
 # ==========================================
 # 0. COCO Dataloader Utils
@@ -226,7 +227,38 @@ def generate_augmented_cossim(clean_cossim, masks, device, target_cossim=0.1):
     return torch.clamp(synthetic_tensor, -1.0, 1.0)
 
 # ==========================================
-# 3. 전체 학습 파이프라인
+# 3. Training Augmentation
+# ==========================================
+def build_train_aug() -> A.Compose:
+    """Randomly applies one augmentation per batch with p=0.5."""
+    return A.Compose([
+        A.OneOf([
+            A.ImageCompression(quality_range=(40, 80), p=1.0),
+            A.GaussianBlur(blur_limit=(3, 17), p=1.0),
+            A.MedianBlur(blur_limit=(3, 7), p=1.0),
+            A.RandomBrightnessContrast(brightness_limit=(-0.5, 1.0), contrast_limit=0, p=1.0),
+            A.RandomBrightnessContrast(brightness_limit=0, contrast_limit=(-0.5, 1.0), p=1.0),
+            A.HueSaturationValue(hue_shift_limit=0, sat_shift_limit=(-50, 100), val_shift_limit=0, p=1.0),
+            A.HueSaturationValue(hue_shift_limit=(-36, 36), sat_shift_limit=0, val_shift_limit=0, p=1.0),
+        ], p=1.0),
+    ], p=0.5)
+
+
+def apply_aug_to_batch(images: torch.Tensor, transform: A.Compose) -> torch.Tensor:
+    """
+    images: [B, C, H, W] float tensor in [0, 1], on GPU
+    Returns: augmented tensor of same shape on same device
+    """
+    device = images.device
+    imgs_np = (images.cpu().permute(0, 2, 3, 1).numpy() * 255).astype(np.uint8)
+    augmented = [transform(image=img)["image"] for img in imgs_np]
+    return torch.from_numpy(
+        np.stack(augmented, axis=0).astype(np.float32) / 255.0
+    ).permute(0, 3, 1, 2).to(device)
+
+
+# ==========================================
+# 4. 전체 학습 파이프라인
 # ==========================================
 def train_framework():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -237,7 +269,8 @@ def train_framework():
     img_size = 256
     feature_dim = 192
 
-    save_dir = "/mnt/nas5/suhyeon/projects/locmark_decoder/0224_dilate_0.2"
+    # save_dir = "/mnt/nas5/suhyeon/projects/locmark_decoder/0224_dilate_0.2"
+    save_dir = "/mnt/nas5/suhyeon/projects/locmark_decoder/0227_aug"
     os.makedirs(save_dir, exist_ok=True)
 
     train_dir = "/mnt/nas5/suhyeon/datasets/coco-2017/train2017"
@@ -270,6 +303,7 @@ def train_framework():
     criterion_dice = DiceLoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
+    aug_transform = build_train_aug()
     
     # Image Encoder & Direction Vectors 로드
     norm_imagenet = T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
@@ -299,8 +333,11 @@ def train_framework():
                 continue
             
             images = images.to(device)
-            masks = (1-masks).to(device) 
-            
+            masks = (1-masks).to(device)
+
+            # Apply random augmentation before feature extraction
+            images = apply_aug_to_batch(images, aug_transform)
+
             # 1. Clean Cossim 추출
             with torch.no_grad():
                 norm_images = norm_imagenet(images)
