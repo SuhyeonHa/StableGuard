@@ -48,7 +48,7 @@ class Params:
         self.num_test_images = 100 # the first n images
 
         # --- Model Configurations ---
-        self.vae_model_name = "stabilityai/stable-diffusion-2-1"
+        self.vae_model_name = "Manojb/stable-diffusion-2-1-base" #"stabilityai/stable-diffusion-2-1"
         self.vae_subfolder = "vae"
         
         # --- Image Size Parameters ---
