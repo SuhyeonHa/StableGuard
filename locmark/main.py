@@ -40,7 +40,7 @@ class Params:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0034.png'
-        self.exp_name = 'hinge-hard-noise-sd2'
+        self.exp_name = 'hinge-hard-noise-sd1'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
         self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark_table_1/ours' # NOTE: multi image optimization, exp_name
         # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
@@ -48,7 +48,7 @@ class Params:
         self.num_test_images = 100 # the first n images
 
         # --- Model Configurations ---
-        self.vae_model_name = "Manojb/stable-diffusion-2-1-base" #"stabilityai/stable-diffusion-2-1"
+        self.vae_model_name = "runwayml/stable-diffusion-v1-5" #"stabilityai/stable-diffusion-2-1"
         self.vae_subfolder = "vae"
         
         # --- Image Size Parameters ---
