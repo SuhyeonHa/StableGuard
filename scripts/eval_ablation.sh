@@ -2,42 +2,17 @@
 #NOTE: check direction_vectors in locmark.py
 
 target_dirs=(
-    # "ours_full/pgd-l2-20-255/20260115-113025"
-    # "ours_full/pgd-l2-25-255/20260115-120417"
-    # "ours_full/pgd-l2-30-255/20260115-113235"
-    # "ours_full/pgd-l2-35-255/20260115-121555"
-
-    # "ours_random_mean/20260104-080404"
-    # "ours_random/20260104-080115"
-    # "ours_ones/20260104-083833"
-    # "ours_random_quan/20260104-080730"
-
-    # "ours_full/pgd-l1-13500/20260119-063406"
-    # "ours_full/pgd-l1-18000/20260119-051652"
-    # "ours_full/pgd-l1-22500/20260119-051759"
-    # "ours_full/pgd-l1-27000/20260119-051931"
-    # "ours_full/pgd-l1-31500/20260119-052023"
-
-    # "ours_full/clamp-8/20260201-123208"
-    # "ours_full/clamp-12/20260201-065353"
-    # "ours_full/clamp-16/20260201-065209"
-    # "ours_full/clamp-20/20260201-063324"
-    # "ours_full/clamp-24/20260201-064936"
-    # "ours_full/clamp-28/20260201-064337"
-
-    "ours_psnr/hinge-hard-noise-target-0.1/20260222-122031"
-    # "ours_abalation/00-baseline/20260222-152841"
-    # "ours_abalation/01-noise/20260222-153139"
-    # "ours_abalation/02-noise-hinge/20260222-153450"
-    # "ours_abalation/03-noise-hard/20260222-1535541"
-    # "ours_abalation/04-noise-hinge-hard/20260222-153719"
-    # "ours_abalation/05-hinge/20260222-153712"
-    # "ours_abalation/06-hinge-hard/20260222-153824"
-    # "ours_abalation/07-hard/20260222-154022"
-    # "ours/20251205-015055"
+    "ours_ablation/00-baseline/20260222-152841"
+    "ours_ablation/01-noise/20260222-153139"
+    "ours_ablation/02-noise-hinge/20260222-153450"
+    "ours_ablation/03-noise-hard/20260222-153554"
+    "ours_ablation/04-noise-hinge-hard/20260222-153719"
+    "ours_ablation/05-hinge/20260222-153712"
+    "ours_ablation/06-hinge-hard/20260222-153824"
+    "ours_ablation/07-hard/20260222-154022"
 )
 
-base_prefix="/mnt/nas5/suhyeon/projects/eval_spliceless"
+base_prefix="/mnt/nas5/suhyeon/projects/locmark_table_1"
 
 for sub_dir in "${target_dirs[@]}"
 do
@@ -53,5 +28,6 @@ do
         eval_size=256 \
         start_idx=0 \
         end_idx=100 \
-        tamper_mode=ldm
+        tamper_mode=ldm \
+        use_refiner=True
 done

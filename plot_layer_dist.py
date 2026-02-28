@@ -48,7 +48,6 @@ def get_fg_mask_feat(fg_mask_np, feat_h):
 
 
 def main():
-    # ── mask 준비 ──
     if INPAINT_MODE == 'zero_mask':
         fg_mask_np = np.zeros((IMAGE_SIZE, IMAGE_SIZE), dtype=np.float32)
     else:
@@ -56,23 +55,17 @@ def main():
 
     zero_mode = is_zero_mask(fg_mask_np)
 
-    # ── records 로드 ──
     assert os.path.exists(RECORDS_PATH), f"records.pkl not found: {RECORDS_PATH}"
     with open(RECORDS_PATH, 'rb') as f:
         records = pickle.load(f)
-    print(f"Loaded records: layers={sorted(records.keys())}, "
-          f"n_images={len(next(iter(records.values())))}")
-
+    
     bins = np.linspace(HMAP_VMIN, HMAP_VMAX, 40)
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 9))
-    fig.suptitle(
-        f"Similarity Map Distribution by Layer",
-        fontsize=14, fontweight='bold'
-    )
+    # 하단 범례 공간 확보를 위해 figsize와 subplots_adjust 조정
+    fig, axes = plt.subplots(2, 2, figsize=(12, 11))
 
     for idx, layer_idx in enumerate(LAYERS):
-        ax  = axes[idx // 2, idx % 2]
+        ax = axes[idx // 2, idx % 2]
         recs = records.get(layer_idx, [])
 
         if not recs:
@@ -92,36 +85,38 @@ def main():
         bg_tile = np.tile(bg_feat, n_img)
 
         if zero_mode:
-            # zero_mask: FG/BG 구분 없음
-            ax.hist(all_orig,  bins=bins, color='lightgray', alpha=1.0,
-                    label='Clean', density=True, histtype='step', linewidth=1.2, linestyle=':')
-            ax.hist(all_wm,    bins=bins, color='darkgray', alpha=0.9,
-                    label='WM',   density=True, histtype='step', linewidth=1.5, linestyle='--')
-            ax.hist(all_regen, bins=bins, color='tomato', alpha=0.6,
-                    label='After', density=True)
+            ax.hist(all_orig,  bins=bins, color='lightgray', label='Clean', 
+                    density=True, histtype='step', linewidth=2.0, linestyle=':')
+            ax.hist(all_wm,    bins=bins, color='darkgray', label='Perturbed', 
+                    density=True, histtype='step', linewidth=1.5, linestyle='--')
+            ax.hist(all_regen, bins=bins, color='tomato', label='After', 
+                    density=True, alpha=0.6)
         else:
-            # Clean (all): darkgray 점선
-            ax.hist(all_orig, bins=bins, color='darkgray', alpha=0.9,
-                    label='Clean', density=True, histtype='step', linewidth=1.5, linestyle=':')
-            # WM (all): darkgray 파선
-            ax.hist(all_wm, bins=bins, color='darkgray', alpha=0.9,
-                    label='Perturbed', density=True, histtype='step', linewidth=1.5, linestyle='--')
-            # 강조: After FG (빨강) / After BG (파랑) — filled
-            ax.hist(all_regen[fg_tile], bins=bins, color='tomato',    alpha=0.55,
-                    label='Foreground', density=True)
-            ax.hist(all_regen[bg_tile], bins=bins, color='steelblue', alpha=0.55,
-                    label='Background', density=True)
+            ax.hist(all_orig, bins=bins, color='darkgray', label='Clean', 
+                    density=True, histtype='step', linewidth=2.0, linestyle=':')
+            ax.hist(all_wm, bins=bins, color='darkgray', label='Perturbed', 
+                    density=True, histtype='step', linewidth=1.5, linestyle='--')
+            ax.hist(all_regen[fg_tile], bins=bins, color='tomato', label='Foreground', 
+                    density=True, alpha=0.55)
+            ax.hist(all_regen[bg_tile], bins=bins, color='steelblue', label='Background', 
+                    density=True, alpha=0.55)
 
-        ax.set_title(f"Layer {layer_idx}", fontsize=12)
-        ax.set_xlabel("cos_sim")
-        ax.set_ylabel("Density")
-        ax.legend(fontsize=8)
+        ax.set_title(f"Layer {layer_idx}", fontsize=28)
+        ax.set_xlabel("Cosine Similarity", fontsize=24)
+        ax.set_ylabel("Density", fontsize=28)
         ax.set_xlim(HMAP_VMIN, HMAP_VMAX)
         ax.grid(alpha=0.3)
+        ax.tick_params(axis='both', labelsize=20)
 
-    plt.tight_layout()
-    save_path = os.path.join(OUT_DIR, "cos_sim_dist_combined.png")
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower center', ncol=2, fontsize=28, bbox_to_anchor=(0.5, 0.02))
+
+    # 범례와 그래프가 겹치지 않도록 여백 조정
+    plt.tight_layout(rect=[0, 0.16, 1, 0.93])
+    plt.subplots_adjust(wspace=0.25, hspace=0.4)
+    
+    save_path = "fig_layer_dist.png"
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
     print(f"Saved: {save_path}")
 

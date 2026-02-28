@@ -32,10 +32,6 @@ def main():
 
     fig, axes = plt.subplots(2, 4, figsize=(16, 8),
                              gridspec_kw={"height_ratios": [1, 1], "hspace": 0.15})
-    fig.suptitle(
-        f"Avg Perturbation by Layer  |  ε={EPSILON:.4f}",
-        fontsize=14, fontweight='bold'
-    )
 
     for col, layer_idx in enumerate(LAYERS):
         delta_list = delta_lists.get(layer_idx, [])
@@ -60,29 +56,38 @@ def main():
         half = fft_size // 2
         delta_crop = delta_vis_norm[cy-half:cy+half, cx-half:cx+half]
         axes[0, col].imshow(delta_crop)
-        axes[0, col].set_title(f"Layer {layer_idx}", fontsize=12)
+        axes[0, col].set_title(f"Layer {layer_idx}", fontsize=28)
         axes[0, col].axis('off')
 
         # ── Row 1: FFT of delta magnitude ──
         fft_mag = np.fft.fftshift(np.fft.fft2(mag_map))
         fft_log = np.log1p(np.abs(fft_mag))
         im = axes[1, col].imshow(fft_log, cmap='inferno')
-        axes[1, col].set_title(f"Layer {layer_idx}", fontsize=12)
+        # axes[1, col].set_title(f"Layer {layer_idx}", fontsize=12)
         axes[1, col].axis('off')
         # colorbar는 아래에서 일괄 처리
 
-    # row labels
-    for row, label in enumerate(["Avg Delta RGB", "FFT log power"]):
-        axes[row, 0].set_ylabel(label, fontsize=11)
+    # row labels: axis('off')이므로 annotate로 왼쪽 바깥에 부착
+    for row, label in zip([0, 1], ["RGB", "Frequency"]):
+        axes[row, 0].annotate(
+            label,
+            xy=(-0.06, 0.5), xycoords='axes fraction',
+            fontsize=28,
+            ha='right', va='center',
+            rotation=90,
+            annotation_clip=False
+        )
 
     # FFT colorbar: Row 1 전체 axes에 공유
-    cbar_ax = fig.add_axes([0.92, 0.08, 0.015, 0.35])  # [left, bottom, width, height]
+    cbar_ax = fig.add_axes([0.92, 0.06, 0.015, 0.35])  # [left, bottom, width, height]
+    cbar_ax.tick_params(labelsize=15)
     sm = plt.cm.ScalarMappable(cmap='inferno')
     sm.set_array([])
     fig.colorbar(sm, cax=cbar_ax)
 
-    plt.subplots_adjust(left=0.06, right=0.90, top=0.90, bottom=0.04, wspace=0.08, hspace=0.15)
-    save_path = os.path.join(OUT_DIR, "avg_perturb_combined.png")
+    plt.subplots_adjust(left=0.06, right=0.90, top=0.90, bottom=0.04, wspace=0.08, hspace=0.1)
+    # save_path = os.path.join(OUT_DIR, "avg_perturb_combined.png")
+    save_path = "fig_layer_perturb.png"
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"Saved: {save_path}")

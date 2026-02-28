@@ -18,7 +18,7 @@ import matplotlib.gridspec as gridspec
 from PIL import Image
 
 # ── CONFIG ────────────────────────────────────────────────────────
-OUT_DIR      = "/mnt/nas5/suhyeon/projects/locmark_motiv_fig/p0.03_seed19"
+OUT_DIR      = "/mnt/nas5/suhyeon/projects/locmark_motiv_fig/p0.02_seed19"
 RECORDS_PATH = os.path.join(OUT_DIR, "records.pkl")
 LAYERS       = [0, 1, 2, 3]
 IMG_IDX      = 19        # 시각화할 이미지 인덱스
@@ -90,7 +90,7 @@ def main():
     # ── 왼쪽: Original image ──
     ax_orig = fig.add_subplot(gs_outer[0, 0])
     ax_orig.imshow(orig_np)
-    ax_orig.set_title("Inputs", fontsize=13, fontweight='bold', pad=8)
+    ax_orig.set_title("Inputs", fontsize=28, pad=8)
     ax_orig.axis('off')
 
     # inset: 오른쪽 하단에 딱 붙임 (axes 좌표 기준)
@@ -108,9 +108,9 @@ def main():
         hspace=0.12, wspace=0.06
     )
 
-    row_labels = ["Perturbed", "Inpainted", "Similarity Map"]
-    # row별 마지막 axes 저장 (오른쪽에 label 붙이기용)
-    last_axes = {}
+    row_labels = ["Perturbed", "Tampered", "Similarity Map"]
+    # row별 col=0 axes 저장 (왼쪽 ylabel 부착용)
+    first_axes = {}
 
     for col, layer_idx in enumerate(LAYERS):
         d = layer_data[layer_idx]
@@ -119,40 +119,44 @@ def main():
         ax = fig.add_subplot(gs_right[0, col])
         ax.imshow(d['wm'])
         ax.axis('off')
-        title = f"Layer {layer_idx}" if np.isnan(d['psnr']) else f"Layer {layer_idx}  PSNR={d['psnr']:.1f}dB"
-        ax.set_title(title, fontsize=12, fontweight='bold')
-        last_axes[0] = ax
+        title = f"Layer {layer_idx}" if np.isnan(d['psnr']) else f"Layer {layer_idx}  ({d['psnr']:.1f} dB)"
+        ax.set_title(title, fontsize=22, pad=10)
+        if col == 0: first_axes[0] = ax
 
         # Row 1: After FG Inpaint (Inpainted)
         ax = fig.add_subplot(gs_right[1, col])
         ax.imshow(d['regen'])
         ax.axis('off')
-        last_axes[1] = ax
+        if col == 0: first_axes[1] = ax
 
         # Row 2: Heatmap after inpaint (Similarity Map)
         ax = fig.add_subplot(gs_right[2, col])
         hmap_rgb = cosmap_to_rgb(d['hmap'])
         ax.imshow(hmap_rgb, interpolation='nearest')
         ax.axis('off')
-        last_axes[2] = ax
+        if col == 0: first_axes[2] = ax
 
-    # 오른쪽 row label: 시계 90도 방향 (rotation=-90)
+    # 왼쪽 row label: axis('off')이므로 ylabel 대신 annotate로 axes 왼쪽 바깥에 부착
+    # xycoords='axes fraction' 기준, x<0이면 axes 왼쪽 바깥
     for row, label in enumerate(row_labels):
-        last_axes[row].annotate(
-            label, fontsize=11, fontweight='bold',
-            xy=(1.04, 0.5), xycoords='axes fraction',
-            ha='left', va='center', rotation=-90
+        first_axes[row].annotate(
+            label,
+            xy=(-0.04, 0.5), xycoords='axes fraction',
+            fontsize=22,
+            ha='right', va='center',
+            rotation=90,
+            annotation_clip=False
         )
 
     # colorbar (heatmap 전용, figure 우측)
     cbar_ax = fig.add_axes([0.975, 0.04, 0.012, 0.27])
     sm = cm.ScalarMappable(norm=plt.Normalize(vmin=HMAP_VMIN, vmax=HMAP_VMAX), cmap='jet')
     sm.set_array([])
-    fig.colorbar(sm, cax=cbar_ax, label='cos_sim')
+    cbar = fig.colorbar(sm, cax=cbar_ax)
+    cbar.ax.tick_params(labelsize=18)
 
-
-
-    save_path = os.path.join(OUT_DIR, f"motiv_img{IMG_IDX:02d}.png")
+    # save_path = os.path.join(OUT_DIR, f"motiv_img{IMG_IDX:02d}.png")
+    save_path = f"fig_layer_sim.png"
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"Saved: {save_path}")

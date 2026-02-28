@@ -488,6 +488,9 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         res = ['flux_spliced_images', 'flux_spliceless_images']
     elif tamper_mode == 'brushnet':
         res = ['brushnet_spliced_images', 'brushnet_spliceless_images']
+    if target_model == 'clean':
+        res = [r for r in res if r != 'msgs']
+
     for n in res:
         os.makedirs(os.path.join(save_path, '%s' % n), exist_ok=True)
 
@@ -564,13 +567,13 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             del sys.modules[k]
         sys.path.remove(_bn_src)
         sys.modules.update(_saved_mods)
-        original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suhyeon/caches/').to('cuda')
     else:
         original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suhyeon/caches/').to('cuda')
         pipe = StableDiffusionInpaintPipeline.from_pretrained(edit_model_name, cache_dir='/mnt/nas5/suhyeon/caches/', safety_checker=None).to('cuda')
 
     # load model
     if target_model == "stableguard":
+        original_vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-1-base", subfolder="vae", cache_dir='/mnt/nas5/suhyeon/caches/').to('cuda')
         # initialize and load weights for MultiplexingWatermarkVAEDecoder
         mpw_vae_decoder = MultiplexingWatermarkVAEDecoder(num_bits=num_bits)
         mpw_vae_decoder_weight = torch.load(os.path.join(weight_path, "mpw_vae_decoder.bin"), map_location="cpu")
@@ -682,6 +685,10 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             cover_images = ToTensor()(cover_images).unsqueeze(0).cuda() # [0, 1]
             cover_images = cover_images * 2.0 - 1.0 # [-1, 1]
 
+        elif target_model == "clean":
+            # 워터마크 없이 원본 이미지를 그대로 사용 (norm_type="rescale" → [-1, 1])
+            cover_images = images
+
         # per-image generator: same image index → same seed across different target_models
         generator = torch.Generator().manual_seed(seed + i)
 
@@ -746,7 +753,12 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                 spliceless_image_pil.save(os.path.join(save_path, 'ldm_spliceless_images', save_file_name.replace("jpg", "png")))
 
                 # save ground-truth mask as image tensor and message vector as .pt file
-                save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+                if target_model == 'clean':
+                    # clean 모드: gt 마스크를 eval_size(256)로 nearest resize해서 저장
+                    mask_gt = F.interpolate(mask, size=(eval_size, eval_size), mode='nearest')
+                    save_image(1-mask_gt, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+                else:
+                    save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
                 # torch.save(msg, os.path.join(save_path, 'msgs', save_file_name.split(".")[0] + '.pt'))
 
         elif tamper_mode == 'controlnet':
@@ -1133,7 +1145,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
 
 @torch.no_grad()
-def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num_bits=48, model_size=512, end_idx=None, aug_type=None, aug_param=None, wm_strength=None, use_refiner=True):
+def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num_bits=48, model_size=512, end_idx=None, aug_type=None, aug_param=None, wm_strength=None, use_refiner=True, save_aug_image=False):
     if aug_type is not None and aug_param is not None:
         exp_suffix = f"{eval_setting}_{aug_type}_{aug_param}"
     else:
@@ -1144,8 +1156,9 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
     # make output folder for predicted masks
     os.makedirs(os.path.join(save_path, f"pred_mask_{exp_suffix}{refiner_tag}"), exist_ok=True)
     os.makedirs(os.path.join(save_path, f"pred_bin_mask_{exp_suffix}{refiner_tag}"), exist_ok=True)
-    os.makedirs(os.path.join(save_path, f"cossim_{exp_suffix}"), exist_ok=True)
-    # os.makedirs(os.path.join(save_path, f"augmented_image_{exp_suffix}"), exist_ok=True)
+    # os.makedirs(os.path.join(save_path, f"cossim_{exp_suffix}"), exist_ok=True)
+    if aug_type is not None and aug_param is not None and save_aug_image:
+        os.makedirs(os.path.join(save_path, f"augmented_{exp_suffix}"), exist_ok=True)
     tamper_image_path = os.path.join(save_path, f"{eval_setting}_images")
 
     valid_exts = (".jpg", ".jpeg", ".png")
@@ -1199,6 +1212,8 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             augmented = attack_transform(image=image_att)
             image_att = augmented['image']
             image = Image.fromarray(image_att)
+            if save_aug_image:
+                image.save(os.path.join(save_path, f"augmented_{exp_suffix}", image_path))
 
         if target_model == "stableguard":
             transform = transforms.Compose([
@@ -1318,8 +1333,8 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             save_image(pred_mask, os.path.join(save_path, f"pred_mask_{exp_suffix}{refiner_tag}", image_path), normalize=False, scale_each=False)
             save_image(bin_prediction, os.path.join(save_path, f"pred_bin_mask_{exp_suffix}{refiner_tag}", image_path), normalize=False, scale_each=False)
 
-            pt_filename = os.path.splitext(image_path)[0] + ".pt"
-            torch.save(logits.cpu(), os.path.join(save_path, f"cossim_{exp_suffix}", pt_filename))
+            # pt_filename = os.path.splitext(image_path)[0] + ".pt"
+            # torch.save(logits.cpu(), os.path.join(save_path, f"cossim_{exp_suffix}", pt_filename))
 
 def save_and_print_config(config, save_path):
     """
@@ -1379,6 +1394,10 @@ if __name__ == "__main__":
     elif c['tamper_mode'] == 'cover':
         eval_setting = ["cover"]
 
+    # clean 모드: 이미지 생성만, detection/evaluation 단계 없음
+    if c['target_model'] == 'clean':
+        eval_setting = []
+
     print("-" * 30)
     print("Running Configuration:")
     print(OmegaConf.to_yaml(final_conf))
@@ -1387,21 +1406,21 @@ if __name__ == "__main__":
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
     save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    # generate_watermark_image(norm=c['normalization'],
-    #                          weight_path=c['weight_path'],
-    #                          target_model=c['target_model'],
-    #                          src_image_path=c['src_image_path'],
-    #                          save_path=c['save_path'],
-    #                          edit_model_name=c['edit_model_name'],
-    #                          seed=c['seed'],
-    #                          num_bits=c['num_bits'],
-    #                          model_size=c['model_size'],
-    #                          eval_size=c['eval_size'],
-    #                          start_idx=c['start_idx'],
-    #                          end_idx=c['end_idx'],
-    #                          tamper_mode=c['tamper_mode'],
-    #                          wm_strength=c['wm_strength'],
-    #                          brushnet_checkpoint_dir=c.get('brushnet_checkpoint_dir', None))
+    generate_watermark_image(norm=c['normalization'],
+                             weight_path=c['weight_path'],
+                             target_model=c['target_model'],
+                             src_image_path=c['src_image_path'],
+                             save_path=c['save_path'],
+                             edit_model_name=c['edit_model_name'],
+                             seed=c['seed'],
+                             num_bits=c['num_bits'],
+                             model_size=c['model_size'],
+                             eval_size=c['eval_size'],
+                             start_idx=c['start_idx'],
+                             end_idx=c['end_idx'],
+                             tamper_mode=c['tamper_mode'],
+                             wm_strength=c['wm_strength'],
+                             brushnet_checkpoint_dir=c.get('brushnet_checkpoint_dir', None))
 
     # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     refiner_tag = '_refiner' if (c['target_model'] == 'ours' and c['use_refiner']) else ''
@@ -1417,7 +1436,8 @@ if __name__ == "__main__":
                             aug_type=c['aug_type'],
                             aug_param=c['aug_param'],
                             wm_strength=c['wm_strength'],
-                            use_refiner=c['use_refiner'])
+                            use_refiner=c['use_refiner'],
+                            save_aug_image=c.get('save_aug_image', False))
         # 3) Evaluate predicted masks against ground-truth masks saved in disk
         pred_mask_dir = f"{c['save_path']}/pred_mask_{setting}{aug_suffix}{refiner_tag}"
         eva = Evaluation(pred_mask_dir, f"{c['save_path']}/gt", eval_size=c['eval_size'], end_idx=c['end_idx'])

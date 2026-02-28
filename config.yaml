@@ -8,6 +8,7 @@ start_idx: 0
 end_idx: 100
 aug_type: null
 aug_param: null
+save_aug_image: false
 tamper_mode: "ldm" # ["ldm", "controlnet", "hdpainter", "zero_mask", "vae_regen", "sdxl", "flux", "brushnet"]
 brushnet_checkpoint_dir: "/mnt/nas5/suhyeon/checkpoints/brushnet"
 
@@ -17,6 +18,7 @@ weight_paths:
   stableguard: "/mnt/nas5/suhyeon/checkpoints/stableguard/weights/clean"
   ours: ""
   ours_e2e: "/mnt/nas5/suhyeon/projects/watermark-anything/locmark-e2e-nopd-noaug-smooth-a2"
+  clean: ""
 
 normalization: # related to their own embedder
   omniguard: "rescale"
@@ -24,6 +26,7 @@ normalization: # related to their own embedder
   stableguard: "rescale"
   ours: "rescale" # doesn't matter
   ours_e2e: "imagenet" # embedder/detector both use ImageNet normalization
+  clean: "rescale"
 
 num_bits:
   omniguard: 64
@@ -31,6 +34,7 @@ num_bits:
   stableguard: 48
   ours: 0
   ours_e2e: 0
+  clean: 0
 
 train_img_size:
   omniguard: 512
@@ -38,6 +42,7 @@ train_img_size:
   stableguard: 256
   ours: 256
   ours_e2e: 256
+  clean: 256
 
 # Watermark strength (shared across models)
 # WAM default: 2.0, OmniGuard default: 1.0

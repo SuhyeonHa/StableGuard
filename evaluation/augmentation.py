@@ -25,17 +25,20 @@ def get_robustness_transform(aug_type, aug_param, image_size=512):
     elif aug_type == 'jpeg':
         # aug_param: quality (50, 80)
         quality = int(aug_param)
-        transforms_list.append(A.ImageCompression(quality_lower=quality, quality_upper=quality, p=1.0))
+        transforms_list.append(A.ImageCompression(quality_range=(quality, quality), p=1.0))
         
     elif aug_type == 'gaussian_blur':
         # aug_param: kernel size (3, 17)
         k = int(aug_param)
         if k % 2 == 0: k += 1
-        transforms_list.append(A.GaussianBlur(blur_limit=(k, k), sigma_limit=0, p=1.0))
-        
+        # OpenCV formula: sigma derived from kernel size
+        sigma = 0.3 * ((k - 1) * 0.5 - 1) + 0.8
+        transforms_list.append(A.GaussianBlur(blur_limit=(k, k), sigma_limit=(sigma, sigma), p=1.0))
+
     elif aug_type == 'gaussian_noise':
-        # aug_param: var_limit (예: 10.0^2 ~ 50.0^2)
-        transforms_list.append(A.GaussNoise(var_limit=(aug_param, aug_param), mean=0, p=1.0))
+        # aug_param: sigma in pixel space (e.g. 1, 3, 5)
+        std_normalized = aug_param / 255.0
+        transforms_list.append(A.GaussNoise(std_range=(std_normalized, std_normalized), p=1.0))
         
     elif aug_type == 'median_filter':
         # aug_param: kernel size (3, 7)
