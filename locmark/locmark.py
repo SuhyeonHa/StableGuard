@@ -54,6 +54,9 @@ class LocMark:
         self.pipe.vae.eval()
         self.pipe.unet.eval()
         self.pipe.text_encoder.eval()
+        del self.pipe.unet
+        del self.pipe.text_encoder
+        torch.cuda.empty_cache()
         
         # self.direction_vectors = torch.load('/mnt/nas5/suhyeon/projects/freq-loc/random_vec.pt').to(self.args.device)
         # self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/random_vec_univ_{self.args.feature_dim}.pt').to(self.args.device)
