@@ -68,7 +68,7 @@ class Params:
         self.num_inference_steps = 100
         self.guidance_scale = 7.5
         self.temperature = 5.0
-        self.target_cossim = 0.05
+        self.target_cossim = 0.1
 
         # --- Optimization Parameters ---
         self.lr = 1.0
