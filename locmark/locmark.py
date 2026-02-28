@@ -1,7 +1,7 @@
 import io
 import os
 import torch
-from diffusers import StableDiffusionInpaintPipeline
+from diffusers import DiffusionPipeline, EulerDiscreteScheduler
 import timm
 import torch.nn.functional as F
 import torchvision.transforms as transforms
@@ -16,28 +16,6 @@ from .helper import load_images_from_path, norm_imagenet, denorm_imagenet
 from .train_decoder import ShallowUpDecoder
 
 
-def _jpeg_compress(image: torch.Tensor, quality: int) -> torch.Tensor:
-    """JPEG compress a [0,1] image tensor (3xHxW). Returns same shape."""
-    pil_image = transforms.ToPILImage()(image.clamp(0, 1))
-    buffer = io.BytesIO()
-    pil_image.save(buffer, format='JPEG', quality=quality)
-    buffer.seek(0)
-    return transforms.ToTensor()(Image.open(buffer)).to(image.device)
-
-
-def _jpeg_compress_batch(images: torch.Tensor, quality: int) -> torch.Tensor:
-    """JPEG compress a [0,1] batch tensor (BxCxHxW). Straight-through compatible."""
-    result = torch.stack([_jpeg_compress(images[i], quality) for i in range(images.shape[0])])
-    return result
-
-
-def _median_filter(images: torch.Tensor, kernel_size: int) -> torch.Tensor:
-    """Apply median filter to a [0,1] batch tensor (BxCxHxW)."""
-    padding = kernel_size // 2
-    images_padded = torch.nn.functional.pad(images, (padding, padding, padding, padding))
-    blocks = images_padded.unfold(2, kernel_size, 1).unfold(3, kernel_size, 1)
-    return blocks.median(dim=-1).values.median(dim=-1).values
-
 epsilon = 1e-6
 
 class LocMark:
@@ -45,8 +23,13 @@ class LocMark:
         self.args = args
 
         # Initialize networks
-        self.pipe = StableDiffusionInpaintPipeline.from_pretrained(
-            "sd-legacy/stable-diffusion-inpainting",
+        scheduler = EulerDiscreteScheduler.from_pretrained(
+            self.args.vae_model_name, subfolder="scheduler",
+            cache_dir='/mnt/nas5/suhyeon/caches'
+        )
+        self.pipe = DiffusionPipeline.from_pretrained(
+            self.args.vae_model_name,
+            scheduler=scheduler,
             # torch_dtype=torch.float16,
             cache_dir='/mnt/nas5/suhyeon/caches'
         ).to(self.args.device)
