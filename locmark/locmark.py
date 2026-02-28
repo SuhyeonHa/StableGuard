@@ -32,7 +32,8 @@ class LocMark:
             scheduler=scheduler,
             # torch_dtype=torch.float16,
             cache_dir='/mnt/nas5/suhyeon/caches'
-        ).to(self.args.device)
+        )
+        self.pipe.vae = self.pipe.vae.to(self.args.device)
         self.image_encoder = timm.create_model(
             'convnext_small.dinov3_lvd1689m',
             pretrained=True,
@@ -49,13 +50,13 @@ class LocMark:
         #     param.requires_grad = False
 
         self.pipe.vae.requires_grad_(False)
-        self.pipe.unet.requires_grad_(False)
-        self.pipe.text_encoder.requires_grad_(False)
+        # self.pipe.unet.requires_grad_(False)
+        # self.pipe.text_encoder.requires_grad_(False)
         self.pipe.vae.eval()
-        self.pipe.unet.eval()
-        self.pipe.text_encoder.eval()
-        del self.pipe.unet
-        del self.pipe.text_encoder
+        # self.pipe.unet.eval()
+        # self.pipe.text_encoder.eval()
+        # del self.pipe.unet
+        # del self.pipe.text_encoder
         torch.cuda.empty_cache()
         
         # self.direction_vectors = torch.load('/mnt/nas5/suhyeon/projects/freq-loc/random_vec.pt').to(self.args.device)
