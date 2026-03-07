@@ -7,98 +7,29 @@ from matplotlib.lines import Line2D
 # 1. Fully-Generated Images
 #################################################
 
-# # 1. Row 설정: 4행으로 변경 [tamper_model, image_name]
-# row_configs = [
-#     ["ldm", "0023.png"], # 23,32, 18, 66
-#     ["brushnet", "0032.png"],
-#     ["control", "0046.png"],
-#     ["hdpainter", "0079.png"]
-# ]
-
-# # 2. 디렉토리 설정: 9열에 맞춰 리스트 조정 (앞의 9개 경로 사용 예시)
-# directories = [
-#     "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/cover_images",
-#     "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/cover_images",
-#     "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/ldm_spliceless_images",
-#     "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/gt",
-#     "/mnt/nas5/suhyeon/projects/locmark_table_1/wam/pred_mask_ldm_spliceless",
-#     "/mnt/nas5/suhyeon/projects/locmark_table_1/omniguard/pred_mask_ldm_spliceless",
-#     "/mnt/nas5/suhyeon/projects/locmark_table_1/stableguard/pred_mask_ldm_spliceless",
-#     "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/pred_bin_mask_ldm_spliceless",
-#     "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/pred_mask_ldm_spliceless_refiner",
-# ]
-
-# row_labels = ["SD-Painter", "BrushNet", "ControlNet", "HD-Painter"]
-# col_labels = ["Clean", "Perturbed", "Tampered", "GT", "WAM", "OmniGuard", "StableGuard", "Ours", "Ours*"]
-
-
-# rows, cols = 4, 9
-# fig, axes = plt.subplots(rows, cols, figsize=(20, 9))
-
-# # 간격 설정 (wspace, hspace = 0.03)
-# plt.subplots_adjust(wspace=0.03, hspace=0.03, left=0.01, right=0.99, top=0.99, bottom=0.01)
-
-# # 이미지 로드 및 배치
-# for r, (tamper_model, name) in enumerate(row_configs):
-#     for c, base_dir in enumerate(directories):
-#         ax = axes[r, c]
-        
-#         # 경로 생성 및 ldm 치환
-#         target_dir = base_dir.replace('ldm', tamper_model)
-#         img_path = os.path.join(target_dir, name)
-        
-#         try:
-#             img = Image.open(img_path)
-            
-#             # 리사이즈 없이 원본 표시
-#             ax.imshow(img, cmap='gray' if img.mode == 'L' else None)
-#         except:
-#             ax.text(0.5, 0.5, 'N/A', ha='center', va='center', fontsize=10)
-        
-#         # 테두리 및 축 설정
-#         ax.set_xticks([]); ax.set_yticks([])
-#         for s in ax.spines.values():
-#             s.set_visible(True)
-#             s.set_edgecolor('black')
-#             s.set_linewidth(0.8)
-
-#         if c == 0:
-#             ax.set_ylabel(row_labels[r], rotation=90, fontsize=20, labelpad=10)
-        
-#         if r == rows - 1:
-#             ax.text(0.5, -0.05, col_labels[c], transform=ax.transAxes, 
-#                     ha='center', va='top', fontsize=20)
-
-# # 결과 저장
-# plt.savefig('fig_qual_fr.png', dpi=300, bbox_inches='tight')
-
-#################################################
-# 2. Spliced Images
-#################################################
-
 # 1. Row 설정: 4행으로 변경 [tamper_model, image_name]
 row_configs = [
-    ["ldm", "0071.png"], # 23,32, 18, 66
-    ["brushnet", "0038.png"],
-    ["control", "0034.png"],
-    ["hdpainter", "0073.png"]
+    ["ldm", "0023.png"], # 23,32, 18, 66
+    ["brushnet", "0032.png"],
+    ["control", "0046.png"],
+    ["hdpainter", "0079.png"]
 ]
 
 # 2. 디렉토리 설정: 9열에 맞춰 리스트 조정 (앞의 9개 경로 사용 예시)
 directories = [
     "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/cover_images",
     "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/cover_images",
-    "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/ldm_spliced_images",
+    "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/ldm_spliceless_images",
     "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/gt",
-    "/mnt/nas5/suhyeon/projects/locmark_table_1/wam/pred_mask_ldm_spliced",
-    "/mnt/nas5/suhyeon/projects/locmark_table_1/omniguard/pred_mask_ldm_spliced",
-    "/mnt/nas5/suhyeon/projects/locmark_table_1/stableguard/pred_mask_ldm_spliced",
-    "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/pred_bin_mask_ldm_spliced",
-    "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/pred_mask_ldm_spliced_refiner",
+    "/mnt/nas5/suhyeon/projects/locmark_table_1/wam/pred_mask_ldm_spliceless",
+    "/mnt/nas5/suhyeon/projects/locmark_table_1/omniguard/pred_mask_ldm_spliceless",
+    "/mnt/nas5/suhyeon/projects/locmark_table_1/stableguard/pred_mask_ldm_spliceless",
+    "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/pred_bin_mask_ldm_spliceless",
+    "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/pred_mask_ldm_spliceless_refiner",
 ]
 
 row_labels = ["SD-Painter", "BrushNet", "ControlNet", "HD-Painter"]
-col_labels = ["Clean", "Perturbed", "Tampered", "GT", "WAM", "OmniGuard", "StableGuard", "Ours", "Ours*"]
+col_labels = ["Clean", "Perturbed", "Tampered", "GT", "WAM", "OmniGuard", "StableGuard", "APT", "APT*"]
 
 
 rows, cols = 4, 9
@@ -132,14 +63,83 @@ for r, (tamper_model, name) in enumerate(row_configs):
             s.set_linewidth(0.8)
 
         if c == 0:
-            ax.set_ylabel(row_labels[r], rotation=90, fontsize=20, labelpad=10)
+            ax.set_ylabel(row_labels[r], rotation=90, fontsize=24, labelpad=10)
         
         if r == rows - 1:
             ax.text(0.5, -0.05, col_labels[c], transform=ax.transAxes, 
-                    ha='center', va='top', fontsize=20)
+                    ha='center', va='top', fontsize=24)
 
 # 결과 저장
-plt.savefig('fig_qual_sp.png', dpi=300, bbox_inches='tight')
+plt.savefig('fig_qual_fr.pdf', dpi=300, bbox_inches='tight')
+
+#################################################
+# 2. Spliced Images
+#################################################
+
+# # 1. Row 설정: 4행으로 변경 [tamper_model, image_name]
+# row_configs = [
+#     ["ldm", "0071.png"], # 23,32, 18, 66
+#     ["brushnet", "0038.png"],
+#     ["control", "0034.png"],
+#     ["hdpainter", "0073.png"]
+# ]
+
+# # 2. 디렉토리 설정: 9열에 맞춰 리스트 조정 (앞의 9개 경로 사용 예시)
+# directories = [
+#     "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/cover_images",
+#     "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/cover_images",
+#     "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/ldm_spliced_images",
+#     "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/gt",
+#     "/mnt/nas5/suhyeon/projects/locmark_table_1/wam/pred_mask_ldm_spliced",
+#     "/mnt/nas5/suhyeon/projects/locmark_table_1/omniguard/pred_mask_ldm_spliced",
+#     "/mnt/nas5/suhyeon/projects/locmark_table_1/stableguard/pred_mask_ldm_spliced",
+#     "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/pred_bin_mask_ldm_spliced",
+#     "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/pred_mask_ldm_spliced_refiner",
+# ]
+
+# row_labels = ["SD-Painter", "BrushNet", "ControlNet", "HD-Painter"]
+# col_labels = ["Clean", "Perturbed", "Tampered", "GT", "WAM", "OmniGuard", "StableGuard", "APT", "APT*"]
+
+
+# rows, cols = 4, 9
+# fig, axes = plt.subplots(rows, cols, figsize=(20, 9))
+
+# # 간격 설정 (wspace, hspace = 0.03)
+# plt.subplots_adjust(wspace=0.03, hspace=0.03, left=0.01, right=0.99, top=0.99, bottom=0.01)
+
+# # 이미지 로드 및 배치
+# for r, (tamper_model, name) in enumerate(row_configs):
+#     for c, base_dir in enumerate(directories):
+#         ax = axes[r, c]
+        
+#         # 경로 생성 및 ldm 치환
+#         target_dir = base_dir.replace('ldm', tamper_model)
+#         img_path = os.path.join(target_dir, name)
+        
+#         try:
+#             img = Image.open(img_path)
+            
+#             # 리사이즈 없이 원본 표시
+#             ax.imshow(img, cmap='gray' if img.mode == 'L' else None)
+#         except:
+#             ax.text(0.5, 0.5, 'N/A', ha='center', va='center', fontsize=10)
+        
+#         # 테두리 및 축 설정
+#         ax.set_xticks([]); ax.set_yticks([])
+#         for s in ax.spines.values():
+#             s.set_visible(True)
+#             s.set_edgecolor('black')
+#             s.set_linewidth(0.8)
+
+#         if c == 0:
+#             ax.set_ylabel(row_labels[r], rotation=90, fontsize=24, labelpad=10)
+        
+#         if r == rows - 1:
+#             ax.text(0.5, -0.05, col_labels[c], transform=ax.transAxes, 
+#                     ha='center', va='top', fontsize=24)
+
+# # 결과 저장
+# plt.savefig('fig_qual_sp.pdf', dpi=300, bbox_inches='tight')
 
 
 

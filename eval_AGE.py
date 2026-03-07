@@ -19,6 +19,7 @@ from torchvision.utils import save_image
 from torchvision.transforms import transforms, ToTensor
 from piq import ssim, psnr, LPIPS
 import sys
+import json
 from transformers import T5EncoderModel
 
 from evaluation import PixelF1, PixelAUC, PixelIOU, PixelAccuracy
@@ -475,7 +476,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
     if tamper_mode == 'ldm':
         res = ['cover_images', 'ldm_spliced_images', 'ldm_spliceless_images', 'gt', 'msgs']
     elif tamper_mode == 'controlnet':
-        res = ['control_spliced_images', 'control_spliceless_images']
+        res = ['cover_images', 'control_spliced_images', 'control_spliceless_images', 'gt', 'msgs']
     elif tamper_mode == 'hdpainter':
         res = ['hdpainter_spliced_images', 'hdpainter_spliceless_images']
     elif tamper_mode == 'zero_mask':
@@ -824,12 +825,18 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                 spliceless_image_pil = Image.fromarray(spliceless_image)
 
                 # save cover and edited images as PNG (replace .jpg extension if present)
-                # cover_image_pil.save(os.path.join(save_path, 'cover_images', save_file_name.replace("jpg", "png")))
+                if target_model != 'ours':
+                    cover_image_pil.save(os.path.join(save_path, 'cover_images', save_file_name.replace("jpg", "png")))
                 spliced_image_pil.save(os.path.join(save_path, 'control_spliced_images', save_file_name.replace("jpg", "png")))
                 spliceless_image_pil.save(os.path.join(save_path, 'control_spliceless_images', save_file_name.replace("jpg", "png")))
 
                 # save ground-truth mask as image tensor and message vector as .pt file
-                # save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+                if target_model == 'clean':
+                    # clean 모드: gt 마스크를 eval_size(256)로 nearest resize해서 저장
+                    mask_gt = F.interpolate(mask, size=(eval_size, eval_size), mode='nearest')
+                    save_image(1-mask_gt, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+                else:
+                    save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
                 # torch.save(msg, os.path.join(save_path, 'msgs', save_file_name.split(".")[0] + '.pt'))
         
         elif tamper_mode == 'hdpainter':
@@ -1336,6 +1343,126 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             # pt_filename = os.path.splitext(image_path)[0] + ".pt"
             # torch.save(logits.cpu(), os.path.join(save_path, f"cossim_{exp_suffix}", pt_filename))
 
+@torch.no_grad()
+def eval_cossim_distribution(target_model, save_path, src_image_path, edit_model_name, model_size=256, end_idx=None, seed=42):
+    """
+    For 'ours' model only: compute and save cosine similarity distribution statistics.
+
+    For each watermarked image in save_path/cover_images:
+      1. wm_cossim       - average cossim over the whole watermarked image
+      2. clean_cossim    - average cossim over the whole clean image
+      3. inp_inside_cossim  - average cossim inside center mask after inpainting
+      4. inp_outside_cossim - average cossim outside center mask after inpainting
+
+    Center mask: model_size//2 × model_size//2 square (1/4 area), centered.
+
+    Results saved to <save_path>/dist_results.json and appended to <save_path>/record.txt.
+    """
+    assert target_model == 'ours', "eval_dist is only supported for 'ours' model"
+
+    args = Params()
+    locmark = LocMark(args=args)
+
+    pipe = StableDiffusionInpaintPipeline.from_pretrained(
+        edit_model_name, cache_dir='/mnt/nas5/suhyeon/caches/', safety_checker=None
+    ).to('cuda')
+
+    cover_path = os.path.join(save_path, 'cover_images')
+    valid_exts = (".jpg", ".jpeg", ".png")
+    image_paths = sorted([f for f in os.listdir(cover_path) if f.lower().endswith(valid_exts)])
+    if end_idx is not None:
+        image_paths = image_paths[:end_idx]
+
+    transform = transforms.Compose([transforms.ToTensor()])
+
+    # Fixed center mask: model_size//2 × model_size//2 square (1/4 area), centered
+    mask_side = model_size // 2
+    y0 = model_size // 4
+    x0 = model_size // 4
+    center_mask = torch.zeros(1, 1, model_size, model_size).cuda()
+    center_mask[0, 0, y0:y0 + mask_side, x0:x0 + mask_side] = 1.0
+
+    per_image = {}
+
+    for img_name in tqdm(image_paths, desc="eval_dist"):
+        # watermarked image
+        wm_tensor = transform(
+            Image.open(os.path.join(cover_path, img_name)).convert("RGB").resize((model_size, model_size))
+        ).unsqueeze(0).cuda()
+
+        # clean image
+        clean_tensor = transform(
+            Image.open(os.path.join(src_image_path, img_name)).convert("RGB").resize((model_size, model_size))
+        ).unsqueeze(0).cuda()
+
+        # raw cossim grids (use_refiner=False → returns patch-level grid before temperature)
+        wm_grid, _, _    = locmark.decode_watermark(wm_tensor,    use_refiner=False)  # [1, 1, H, W]
+        clean_grid, _, _ = locmark.decode_watermark(clean_tensor, use_refiner=False)
+
+        wm_cossim    = wm_grid.mean().item()
+        clean_cossim = clean_grid.mean().item()
+
+        # center inpainting on watermarked image
+        inp_input_512 = F.interpolate(wm_tensor * 2.0 - 1.0, size=(512, 512), mode="bilinear", align_corners=False)
+        mask_512      = F.interpolate(center_mask,             size=(512, 512), mode="nearest")
+
+        generator = torch.Generator().manual_seed(seed)
+        generated_pil = pipe(
+            prompt="", image=inp_input_512, mask_image=mask_512,
+            generator=generator, num_inference_steps=50
+        ).images[0]
+
+        generated_tensor = F.interpolate(
+            ToTensor()(generated_pil).unsqueeze(0).cuda(),
+            size=(model_size, model_size), mode="bilinear", align_corners=False
+        )
+        inpainted = center_mask * generated_tensor + (1 - center_mask) * wm_tensor
+
+        # cossim grid for the inpainted image
+        inp_grid, _, _ = locmark.decode_watermark(inpainted, use_refiner=False)
+
+        # downsample center mask to feature grid resolution for per-region averaging
+        feat_h, feat_w = inp_grid.shape[2], inp_grid.shape[3]
+        feat_mask = F.interpolate(center_mask, size=(feat_h, feat_w), mode="nearest")
+
+        inside_cossim  = inp_grid[feat_mask > 0.5].mean().item()
+        outside_cossim = inp_grid[feat_mask <= 0.5].mean().item()
+
+        per_image[img_name] = {
+            'wm_cossim':          wm_cossim,
+            'clean_cossim':       clean_cossim,
+            'inp_inside_cossim':  inside_cossim,
+            'inp_outside_cossim': outside_cossim,
+        }
+
+    # aggregate
+    wm_avg      = float(np.mean([v['wm_cossim']          for v in per_image.values()]))
+    clean_avg   = float(np.mean([v['clean_cossim']        for v in per_image.values()]))
+    inside_avg  = float(np.mean([v['inp_inside_cossim']   for v in per_image.values()]))
+    outside_avg = float(np.mean([v['inp_outside_cossim']  for v in per_image.values()]))
+
+    summary = dict(
+        wm_cossim_avg=wm_avg,
+        clean_cossim_avg=clean_avg,
+        inp_inside_cossim_avg=inside_avg,
+        inp_outside_cossim_avg=outside_avg,
+        per_image=per_image,
+    )
+
+    results_path = os.path.join(save_path, 'dist_results.json')
+    with open(results_path, 'w') as f:
+        json.dump(summary, f, indent=4)
+
+    msg = (
+        f"[eval_dist] N:{len(per_image)}, "
+        f"WM: {wm_avg:.4f}, Clean: {clean_avg:.4f}, "
+        f"Inp inside: {inside_avg:.4f}, Inp outside: {outside_avg:.4f}\n"
+    )
+    print(msg)
+    with open(os.path.join(save_path, "record.txt"), "a+") as f:
+        f.write(msg)
+
+
 def save_and_print_config(config, save_path):
     """
     Save and print the configuration dictionary to a YAML file.
@@ -1406,21 +1533,21 @@ if __name__ == "__main__":
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
     save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    generate_watermark_image(norm=c['normalization'],
-                             weight_path=c['weight_path'],
-                             target_model=c['target_model'],
-                             src_image_path=c['src_image_path'],
-                             save_path=c['save_path'],
-                             edit_model_name=c['edit_model_name'],
-                             seed=c['seed'],
-                             num_bits=c['num_bits'],
-                             model_size=c['model_size'],
-                             eval_size=c['eval_size'],
-                             start_idx=c['start_idx'],
-                             end_idx=c['end_idx'],
-                             tamper_mode=c['tamper_mode'],
-                             wm_strength=c['wm_strength'],
-                             brushnet_checkpoint_dir=c.get('brushnet_checkpoint_dir', None))
+    # generate_watermark_image(norm=c['normalization'],
+    #                          weight_path=c['weight_path'],
+    #                          target_model=c['target_model'],
+    #                          src_image_path=c['src_image_path'],
+    #                          save_path=c['save_path'],
+    #                          edit_model_name=c['edit_model_name'],
+    #                          seed=c['seed'],
+    #                          num_bits=c['num_bits'],
+    #                          model_size=c['model_size'],
+    #                          eval_size=c['eval_size'],
+    #                          start_idx=c['start_idx'],
+    #                          end_idx=c['end_idx'],
+    #                          tamper_mode=c['tamper_mode'],
+    #                          wm_strength=c['wm_strength'],
+    #                          brushnet_checkpoint_dir=c.get('brushnet_checkpoint_dir', None))
 
     # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     refiner_tag = '_refiner' if (c['target_model'] == 'ours' and c['use_refiner']) else ''
@@ -1446,3 +1573,15 @@ if __name__ == "__main__":
     # 4) Evaluate fidelity between watermarked and original images
     # eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'], end_idx=c['end_idx'])
     # eva_fid.run(f"{c['save_path']}/cover_images")
+
+    # 5) eval_dist: cossim distribution analysis (ours only)
+    # if c.get('eval_dist', False) and c['target_model'] == 'ours':
+    #     eval_cossim_distribution(
+    #         target_model=c['target_model'],
+    #         save_path=c['save_path'],
+    #         src_image_path=c['src_image_path'],
+    #         edit_model_name=c['edit_model_name'],
+    #         model_size=c['model_size'],
+    #         end_idx=c['end_idx'],
+    #         seed=c['seed'],
+    #     )

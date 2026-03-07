@@ -156,7 +156,7 @@ def main():
     cbar.ax.tick_params(labelsize=18)
 
     # save_path = os.path.join(OUT_DIR, f"motiv_img{IMG_IDX:02d}.png")
-    save_path = f"fig_layer_sim.png"
+    save_path = f"fig_layer_sim.pdf"
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"Saved: {save_path}")

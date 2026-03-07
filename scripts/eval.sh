@@ -3,28 +3,41 @@
 NUM_IMG=100
 TAMPER_MODEL=ldm # ldm, controlnet, hdpainter, brushnet, zero_mask, vae_regen, 
 
-# clean
-python eval_AGE.py \
-    target_model=clean \
-    src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
-    save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/clean \
-    edit_model_name=sd-legacy/stable-diffusion-inpainting \
-    eval_size=256 \
-    start_idx=0 \
-    end_idx=$NUM_IMG \
-    tamper_mode=$TAMPER_MODEL
-
-# wam
+# eval
 # python eval_AGE.py \
-#     target_model=wam \
+#     target_model=ours \
 #     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
-#     save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/wam \
+#     save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858 \
 #     edit_model_name=sd-legacy/stable-diffusion-inpainting \
 #     eval_size=256 \
 #     start_idx=0 \
 #     end_idx=$NUM_IMG \
 #     tamper_mode=$TAMPER_MODEL \
-#     wm_strength=3.0
+#     use_refiner=False \
+#     eval_dist=True
+
+# clean
+# python eval_AGE.py \
+#     target_model=clean \
+#     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
+#     save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/clean \
+#     edit_model_name=sd-legacy/stable-diffusion-inpainting \
+#     eval_size=256 \
+#     start_idx=100 \
+#     end_idx=$NUM_IMG \
+#     tamper_mode=$TAMPER_MODEL
+
+# wam
+python eval_AGE.py \
+    target_model=wam \
+    src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
+    save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/wam \
+    edit_model_name=sd-legacy/stable-diffusion-inpainting \
+    eval_size=256 \
+    start_idx=0 \
+    end_idx=$NUM_IMG \
+    tamper_mode=$TAMPER_MODEL \
+    wm_strength=3.0
 
 # # # omniguard
 # python eval_AGE.py \
@@ -61,16 +74,16 @@ python eval_AGE.py \
 #     tamper_mode=$TAMPER_MODEL \
 #     use_refiner=False
 
-# python eval_AGE.py \
-#     target_model=ours \
-#     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
-#     save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858 \
-#     edit_model_name=sd-legacy/stable-diffusion-inpainting \
-#     eval_size=256 \
-#     start_idx=0 \
-#     end_idx=$NUM_IMG \
-#     tamper_mode=$TAMPER_MODEL \
-#     use_refiner=True
+python eval_AGE.py \
+    target_model=ours \
+    src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
+    save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858 \
+    edit_model_name=sd-legacy/stable-diffusion-inpainting \
+    eval_size=256 \
+    start_idx=0 \
+    end_idx=$NUM_IMG \
+    tamper_mode=$TAMPER_MODEL \
+    use_refiner=True
 
 ###############
 

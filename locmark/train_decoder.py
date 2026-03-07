@@ -388,4 +388,12 @@ def train_framework():
         torch.save(model.state_dict(), os.path.join(save_dir, f"shallow_refiner_{epoch+1}.pth"))
 
 if __name__ == "__main__":
-    train_framework()
+    model = ShallowUpDecoder()
+    total = sum(p.numel() for p in model.parameters())
+    if total >= 1_000_000:
+        print(f"Total params: {total / 1_000_000:.2f}M ({total:,})")
+    elif total >= 1_000:
+        print(f"Total params: {total / 1_000:.2f}K ({total:,})")
+    else:
+        print(f"Total params: {total:,}")
+    # train_framework()
