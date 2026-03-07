@@ -8,7 +8,7 @@ set -e
 
 # copy workspace from private git repo
 GIT_REPO="StableGuard"
-GIT_BRANCH="exp/uni_setup"
+GIT_BRANCH="exp/anchor_map"
 TOKEN_FILE="/mnt/nas5/suhyeon/tokens/github_token.txt"
 HF_TOKEN_FILE="/mnt/nas5/suhyeon/tokens/hf_token.txt"
 
@@ -21,9 +21,6 @@ rm -rf "${GIT_REPO}"
 git clone --branch "${GIT_BRANCH}" "${GIT_REPO_URL}"
 cd "${GIT_REPO}"
 echo "Clone complete."
-
-# packages
-pip install -U bitsandbytes
 
 # python eval_AGE.py
 python -m locmark.main

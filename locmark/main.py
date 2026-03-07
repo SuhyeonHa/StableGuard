@@ -40,11 +40,11 @@ class Params:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0049.png'
-        self.exp_name = 'hinge-hard-noise-500-0049'
+        self.exp_name = 'supp-anchor-map'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
         self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark_table_1/ours' # NOTE: multi image optimization, exp_name
         # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
-        self.single_image_mode = True # NOTE
+        self.single_image_mode = False # NOTE
         self.num_test_images = 100 # the first n images
 
         # --- Model Configurations ---
@@ -60,13 +60,9 @@ class Params:
         ])
 
         # --- LocMark Core Parameters ---
-        self.margin = 1.0
-        self.grid_size = 28
         self.mask_percentage = 0.3
         self.num_masks = 1
         self.seed = 42
-        self.num_inference_steps = 100
-        self.guidance_scale = 7.5
         self.temperature = 5.0
         self.target_cossim = 0.1
 
@@ -75,8 +71,6 @@ class Params:
         self.steps = 150
         self.lambda_p = 0.1 #0.1 #0.05 #0.025
         self.lambda_i = 0.05 #0.05 #0.01 #0.005
-        self.lambda_clean = 1.0
-        self.lambda_noisy = 1.0
         self.feat_layer = 1
         self.epsilon = 16/255
 
@@ -84,10 +78,11 @@ class Params:
         self.eps0_std = [0.0, 0.25] # Latent noise sigma range
         self.aug_noise_std = [0.0, 0.025] # Image-space Gaussian noise sigma range in [0,1]
         
-        # --- Demo/Evaluation Parameters ---
-        self.batch_size = 1
-        # self.num_test_images = 1
+        # --- Anchor Parameters ---
+        self.load_anchor = True
+        self.anchor_map = True
 
+        # --- Demo/Evaluation Parameters ---
         self.feature_dim = None
         # tiny, small
         if self.feat_layer == 0:
@@ -98,6 +93,17 @@ class Params:
             self.feature_dim = 384
         elif self.feat_layer == 3:
             self.feature_dim = 768
+
+        # Feature map spatial sizes per feat_layer: 64, 32, 16, 8
+        if self.feat_layer == 0:
+            self.feat_map_size = 64
+        elif self.feat_layer == 1:
+            self.feat_map_size = 32
+        elif self.feat_layer == 2:
+            self.feat_map_size = 16
+        elif self.feat_layer == 3:
+            self.feat_map_size = 8
+
         # base
         # if self.feat_layer == 0:
         #     self.feature_dim = 96

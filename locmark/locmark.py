@@ -50,45 +50,45 @@ class LocMark:
         #     param.requires_grad = False
 
         self.pipe.vae.requires_grad_(False)
-        # self.pipe.unet.requires_grad_(False)
-        # self.pipe.text_encoder.requires_grad_(False)
+        self.pipe.unet.requires_grad_(False)
+        self.pipe.text_encoder.requires_grad_(False)
         self.pipe.vae.eval()
-        # self.pipe.unet.eval()
-        # self.pipe.text_encoder.eval()
-        # del self.pipe.unet
-        # del self.pipe.text_encoder
+        self.pipe.unet.eval()
+        self.pipe.text_encoder.eval()
+        del self.pipe.unet
+        del self.pipe.text_encoder
         torch.cuda.empty_cache()
         
         # self.direction_vectors = torch.load('/mnt/nas5/suhyeon/projects/freq-loc/random_vec.pt').to(self.args.device)
         # self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/random_vec_univ_{self.args.feature_dim}.pt').to(self.args.device)
-        self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt').to(self.args.device)
-        # self.direction_vectors = self.generate_universal_vectors(self.args.feature_dim)
-        # torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_ones_{self.args.feature_dim}.pt')
+        self.direction_vectors = self.generate_universal_vectors(self.args.feature_dim, load=args.load_anchor, map=args.anchor_map)
         self.num_patches = (self.args.image_size // 14) ** 2
 
         self.loss_fn_vgg = lpips.LPIPS(net='alex').to(self.args.device)
         self.loss_fn_vgg.eval()
 
-    def generate_universal_vectors(self, feature_dim):
+    def generate_universal_vectors(self, feature_dim, load=False, map=False):
         """
-        어떤 Feature가 들어와도 DC 성분(크기)을 무시하고 
-        방향만 검출할 수 있는 Universal Vector 생성
+        Universal direction vectors 생성 또는 로드.
+
+        Args:
+            feature_dim: feature channel 수
+            load: True면 저장된 파일에서 로드, False면 새로 생성 후 저장
+            map: True면 feature map 크기 (H*W, C)로 생성, False면 (1, C)로 생성
         """
-        # vecs = torch.ones(1, feature_dim)
-        # 1. 랜덤 생성
-        vecs = torch.randn(1, feature_dim)
-        
-        # # 2. [핵심] Zero-Mean Centering (평균 제거)
-        # # 각 벡터(row)의 평균을 계산해서 뺌 -> 합이 0이 됨
+        map_suffix = f'_map_{self.args.feat_map_size}' if map else ''
+        vec_path = f'/mnt/nas5/suhyeon/projects/freq-loc/anchor_{feature_dim}{map_suffix}.pt'
+
+        if load:
+            return torch.load(vec_path, map_location=self.args.device)
+
+        n = self.args.feat_map_size ** 2 if map else 1
+        vecs = torch.randn(n, feature_dim)
         vecs = vecs - vecs.mean(dim=1, keepdim=True)
-        
-        # # 3. Sign Quantization (강건성 향상)
-        # # 0인 경우를 방지하기 위해 아주 작은 noise 추가 후 sign
         vecs = torch.sign(vecs + 1e-6)
-        
-        # 4. L2 Normalization
         vecs = vecs / torch.norm(vecs, p=2, dim=1, keepdim=True)
-        
+
+        torch.save(vecs, vec_path)
         return vecs.to(self.args.device)
 
     def _create_random_mask(self, img_pt, num_masks=1, mask_percentage=0.1, max_attempts=100):
@@ -148,18 +148,6 @@ class LocMark:
         Returns:
             Watermarked image tensor
         """
-
-        # for ablation study
-        is_hinge = 'hinge' in getattr(self.args, 'exp_name', '')
-        is_hard = 'hard' in getattr(self.args, 'exp_name', '')
-        is_noise = 'noise' in getattr(self.args, 'exp_name', '')
-        if is_hinge:
-            print("[1] Running model w/ angular hinge loss")
-        if is_hard:
-            print("[2] Running model w/ hard sample loss")
-        if is_noise:
-            print("[3] Running model w/ patch noise injection")
-
         original = original.to(self.args.device)
         # message = message.to(self.device)
         
@@ -203,20 +191,19 @@ class LocMark:
             # masked = watermarked_image * mask + (1 - mask) * image
 
             # Patch noise injection
-            if is_noise:
-                # uniform noise
-                latent_mask = F.interpolate(original_mask, size=(64, 64), mode="bilinear", align_corners=False)
-                
-                std_val_0 = random.uniform(self.args.eps0_std[0], self.args.eps0_std[1])
-                eps0 = torch.randn_like(perturbed_latent) * std_val_0
+            # uniform noise
+            latent_mask = F.interpolate(original_mask, size=(64, 64), mode="bilinear", align_corners=False)
+            
+            std_val_0 = random.uniform(self.args.eps0_std[0], self.args.eps0_std[1])
+            eps0 = torch.randn_like(perturbed_latent) * std_val_0
 
-                perturbed_latent_1 = (perturbed_latent + eps0)*latent_mask + perturbed_latent*(1-latent_mask)
+            perturbed_latent_1 = (perturbed_latent + eps0)*latent_mask + perturbed_latent*(1-latent_mask)
 
-                watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
-                watermarked_image_1 = (watermarked_image_1 + 1) / 2
+            watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
+            watermarked_image_1 = (watermarked_image_1 + 1) / 2
 
-                # clamp
-                watermarked_image_1 = torch.clamp(watermarked_image_1, 0.0, 1.0)
+            # clamp
+            watermarked_image_1 = torch.clamp(watermarked_image_1, 0.0, 1.0)
 
             # Compute losses
             image = F.interpolate(original, size=(img_size, img_size), mode="bilinear", align_corners=False)
@@ -238,7 +225,7 @@ class LocMark:
             B, C, H, W = features.shape # [1, 192, 32, 32]
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
-            base_cos_sim = torch.matmul(features_norm, self.direction_vectors.T)
+            base_cos_sim = self._cossim(features_norm)
 
             if step == 0 or (step+1) % 100 == 0:
                 print("Base Cosine Similarity - Min: {}, Max: {}, Mean: {}".format(
@@ -251,23 +238,22 @@ class LocMark:
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
-            cos_sim = torch.matmul(features_norm, self.direction_vectors.T)
+            cos_sim = self._cossim(features_norm)
             if step == 0 or (step+1) % 100 == 0:
                 print("Cosine Similarity - Min: {}, Max: {}, Mean: {}".format(
                     torch.min(cos_sim), torch.max(cos_sim), torch.mean(cos_sim)))
 
-            if is_noise:
-                watermarked_image_1 = F.interpolate(watermarked_image_1, size=(img_size, img_size), mode="bilinear", align_corners=False)
-                watermarked_image_1 = norm_imagenet(watermarked_image_1)
+            watermarked_image_1 = F.interpolate(watermarked_image_1, size=(img_size, img_size), mode="bilinear", align_corners=False)
+            watermarked_image_1 = norm_imagenet(watermarked_image_1)
 
-                features = self.image_encoder(watermarked_image_1)[self.args.feat_layer]
-                # features = self.feature_upsampler(watermarked_image_1, features, q_chunk_size=3)
-                features = features.permute(0, 2, 3, 1).view(B, H * W, C)
-                features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
-                cos_sim_1 = torch.matmul(features_norm, self.direction_vectors.T)
-                if step == 0 or (step+1) % 100 == 0:
-                    print("Cosine Similarity (Noisy) - Min: {}, Max: {}, Mean: {}".format(
-                        torch.min(cos_sim_1), torch.max(cos_sim_1), torch.mean(cos_sim_1)))
+            features = self.image_encoder(watermarked_image_1)[self.args.feat_layer]
+            # features = self.feature_upsampler(watermarked_image_1, features, q_chunk_size=3)
+            features = features.permute(0, 2, 3, 1).view(B, H * W, C)
+            features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
+            cos_sim_1 = self._cossim(features_norm)
+            if step == 0 or (step+1) % 100 == 0:
+                print("Cosine Similarity (Noisy) - Min: {}, Max: {}, Mean: {}".format(
+                    torch.min(cos_sim_1), torch.max(cos_sim_1), torch.mean(cos_sim_1)))
 
             B = cos_sim.shape[0]
             H = W = int(cos_sim.shape[1] ** 0.5)
@@ -278,26 +264,14 @@ class LocMark:
                 print(f"Noise Floor Cosine Similarity: {noise_floor:.4f}")
                 print(f"Target Cosine Similarity: {target_cosine:.4f}")
             
-            if is_hinge:
-                loss_m = torch.mean(F.relu(target_cosine - cos_sim))
-            else:
-                loss_m = torch.mean(1 - cos_sim)
+            #loss_m = torch.mean(1 - cos_sim)
+            loss_m = torch.mean(F.relu(target_cosine - cos_sim))
+            loss_m1 = torch.mean(F.relu(target_cosine - cos_sim_1))
 
-            if is_hard:
-                loss_h = self._hard_negative_mining_loss(cos_sim, target_cosine, k_percent=0.1)
-            
-            # loss_d = self._dice_loss(cos_sim_masked, mask)
-            # loss_d1 = self._dice_loss(cos_sim_masked_1, mask)
-            
-            # masked = denorm_imagenet(masked)
-            # masked_1 = denorm_imagenet(masked_1)
+            watermarked_image_1 = denorm_imagenet(watermarked_image_1)
 
-            if is_noise:
-                loss_m1 = torch.mean(F.relu(target_cosine - cos_sim_1))
-                watermarked_image_1 = denorm_imagenet(watermarked_image_1)
-
-            if is_hard and is_noise:
-                loss_h1 = self._hard_negative_mining_loss(cos_sim_1, target_cosine, k_percent=0.1)
+            loss_h = self._hard_negative_mining_loss(cos_sim, target_cosine, k_percent=0.1)
+            loss_h1 = self._hard_negative_mining_loss(cos_sim_1, target_cosine, k_percent=0.1)
 
             image = denorm_imagenet(image)
             watermarked_image = denorm_imagenet(watermarked_image)
@@ -305,18 +279,11 @@ class LocMark:
             loss_psnr = self._psnr_loss(watermarked_image, image)
             loss_lpips = self._lpips_loss(watermarked_image, image)
 
-            total_loss = self.args.lambda_clean * loss_m + \
-                          self.args.lambda_p * loss_psnr + \
-                          self.args.lambda_i * loss_lpips
-            
-            if is_noise:
-                total_loss += self.args.lambda_noisy * loss_m1
-                
-            if is_hard:
-                total_loss += loss_h
-            
-            if is_hard and is_noise:
-                total_loss += loss_h1
+            total_loss = loss_m + \
+                         loss_m1 + \
+                         loss_h + loss_h1 + \
+                         self.args.lambda_p * loss_psnr + \
+                         self.args.lambda_i * loss_lpips
             
             total_loss.backward()
             optimizer.step()
@@ -325,12 +292,9 @@ class LocMark:
                 psnr_val = self._compute_psnr(watermarked_image.detach(), image.detach())
                 print(f"Step {step+1}, Loss: {total_loss.item():.4f}, PSNR: {psnr_val:.2f}")
                 print(f"Mask loss: {loss_m.item():.4f}")
-                if is_noise:
-                    print(f"Mask1 loss: {loss_m1.item():.4f}")
-                if is_hard:
-                    print(f"Hard Neg Loss: {loss_h.item():.4f}")
-                if is_hard and is_noise:
-                    print(f"Hard Neg1 Loss: {loss_h1.item():.4f}")
+                print(f"Mask1 loss: {loss_m1.item():.4f}")
+                print(f"Hard Neg Loss: {loss_h.item():.4f}")
+                print(f"Hard Neg1 Loss: {loss_h1.item():.4f}")
                 # print(f"Dice Loss: {loss_d.item():.4f}, Dice1 Loss: {loss_d1.item():.4f}")
                 print(f"PSNR Loss: {loss_psnr.item():.4f}, LPIPS Loss: {loss_lpips.item():.4f}")
 
@@ -359,7 +323,7 @@ class LocMark:
 
             epsilon = 1e-6
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
-            dot_products = torch.matmul(features_norm, self.direction_vectors.T)
+            dot_products = self._cossim(features_norm)
 
             B = dot_products.shape[0]
             H = W = int(dot_products.shape[1] ** 0.5)
@@ -376,6 +340,16 @@ class LocMark:
 
         return grid, confidence_map, binary_prediction
     
+    def _cossim(self, features_norm: torch.Tensor) -> torch.Tensor:
+        """direction_vectors shape에 따라 cosine similarity 계산.
+        map=False: (1, C)  → matmul → [B, H*W, 1]
+        map=True:  (H*W, C) → per-patch dot → [B, H*W, 1]
+        """
+        if self.direction_vectors.shape[0] == 1:
+            return torch.matmul(features_norm, self.direction_vectors.T)
+        else:
+            return torch.sum(features_norm * self.direction_vectors.unsqueeze(0), dim=-1, keepdim=True)
+
     def _psnr_loss(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Negative PSNR loss (Equation 5)"""
         mse = F.mse_loss(pred, target)
