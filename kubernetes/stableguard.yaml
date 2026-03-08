@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-locmark-psnr-0.025
+  name: suhyeon-train-locmark-psnr-0.2
 spec:
   template:
     spec:
