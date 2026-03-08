@@ -1592,8 +1592,8 @@ if __name__ == "__main__":
         eva.run(pred_mask_dir, tamper_mode=c['tamper_mode'])
 
     # 4) Evaluate fidelity between watermarked and original images
-    # eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'], end_idx=c['end_idx'])
-    # eva_fid.run(f"{c['save_path']}/cover_images")
+    eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'], end_idx=c['end_idx'])
+    eva_fid.run(f"{c['save_path']}/cover_images")
 
     # 5) eval_dist: cossim distribution analysis (ours only)
     # if c.get('eval_dist', False) and c['target_model'] == 'ours':

@@ -16,10 +16,10 @@ def save_diff_images(dir_cl, dir_cover, dir_spliced, dir_spliceless, dir_mask, f
     # 이미지 로드
     img_cl = transform(Image.open(path_cl).convert('RGB')).unsqueeze(0)
     img_cv = transform(Image.open(path_cv).convert('RGB')).unsqueeze(0)
-    img_sp = transform(Image.open(path_sp).convert('RGB'))
-    img_sl = transform(Image.open(path_sl).convert('RGB'))
-    # img_sp = transform(Image.open(path_sp).convert('RGB')).unsqueeze(0)
-    # img_sl = transform(Image.open(path_sl).convert('RGB')).unsqueeze(0)
+    # img_sp = transform(Image.open(path_sp).convert('RGB'))
+    # img_sl = transform(Image.open(path_sl).convert('RGB'))
+    img_sp = transform(Image.open(path_sp).convert('RGB')).unsqueeze(0)
+    img_sl = transform(Image.open(path_sl).convert('RGB')).unsqueeze(0)
     
     # 마스크 로드 (L: Grayscale)
     mask = transform(Image.open(path_ms).convert('L')).unsqueeze(0) # [1, 1, H, W]
@@ -32,8 +32,8 @@ def save_diff_images(dir_cl, dir_cover, dir_spliced, dir_spliceless, dir_mask, f
 
     img_cl = resample(img_cl)
     img_cv = resample(img_cv)
-    # img_sp = resample(img_sp)
-    # img_sl = resample(img_sl)
+    img_sp = resample(img_sp)
+    img_sl = resample(img_sl)
     
     # 마스크도 동일한 크기로 보간 (256, 256)
     mask = F.interpolate(mask, size=(256, 256), mode="nearest").squeeze(0) # [1, 256, 256]
@@ -64,24 +64,32 @@ def save_diff_images(dir_cl, dir_cover, dir_spliced, dir_spliceless, dir_mask, f
 # DIR_SL = "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/ldm_spliceless_images"
 
 # wam
-DIR_CL = "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/cover_images"
-DIR_CV = "/mnt/nas5/suhyeon/projects/locmark_table_1/wam/cover_images"
-DIR_SP = "/mnt/nas5/suhyeon/projects/locmark_table_1/wam/ldm_spliced_images"
-DIR_SL = "/mnt/nas5/suhyeon/projects/locmark_table_1/wam/ldm_spliceless_images"
-DIR_MS = "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/gt"
+# DIR_CL = "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/cover_images"
+# DIR_CV = "/mnt/nas5/suhyeon/projects/locmark_table_1/wam/cover_images"
+# DIR_SP = "/mnt/nas5/suhyeon/projects/locmark_table_1/wam/ldm_spliced_images"
+# DIR_SL = "/mnt/nas5/suhyeon/projects/locmark_table_1/wam/ldm_spliceless_images"
+# DIR_MS = "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/gt"
 
 #omniguard
-# DIR_CL = "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/cover_images"
-# DIR_CV = "/mnt/nas5/suhyeon/projects/locmark_table_1/omniguard/cover_images"
-# DIR_SP = "/mnt/nas5/suhyeon/projects/locmark_table_1/omniguard/ldm_spliced_images"
-# DIR_SL = "/mnt/nas5/suhyeon/projects/locmark_table_1/omniguard/ldm_spliceless_images"
-# DIR_MS = "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/gt"
+DIR_CL = "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/cover_images"
+DIR_CV = "/mnt/nas5/suhyeon/projects/locmark_table_1/omniguard/cover_images"
+DIR_SP = "/mnt/nas5/suhyeon/projects/locmark_table_1/omniguard/ldm_spliced_images"
+DIR_SL = "/mnt/nas5/suhyeon/projects/locmark_table_1/omniguard/ldm_spliceless_images"
+DIR_MS = "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/gt"
 
 #stableguard
 # DIR_CL = "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/cover_images"
 # DIR_CV = "/mnt/nas5/suhyeon/projects/locmark_table_1/stableguard/cover_images"
 # DIR_SP = "/mnt/nas5/suhyeon/projects/locmark_table_1/stableguard/ldm_spliced_images"
 # DIR_SL = "/mnt/nas5/suhyeon/projects/locmark_table_1/stableguard/ldm_spliceless_images"
+# DIR_MS = "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/gt"
+
+#ours
+# DIR_CL = "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/cover_images"
+# DIR_CV = "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/cover_images"
+# DIR_SP = "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/ldm_spliced_images"
+# DIR_SL = "/mnt/nas5/suhyeon/projects/locmark_table_1/ours/hinge-hard-noise-500/20260226-045858/ldm_spliceless_images"
+# DIR_MS = "/mnt/nas5/suhyeon/projects/locmark_table_1/clean/gt"
 
 FILE = "0221.png"
 save_diff_images(DIR_CL, DIR_CV, DIR_SP, DIR_SL, DIR_MS, FILE)

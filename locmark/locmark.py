@@ -35,11 +35,11 @@ class LocMark:
         )
         self.pipe.vae = self.pipe.vae.to(self.args.device)
         self.image_encoder = timm.create_model(
-            # 'convnext_small.dinov3_lvd1689m',
-            'vit_small_patch16_dinov3.lvd1689m',
+            'convnext_small.dinov3_lvd1689m',
+            # 'vit_small_patch16_dinov3.lvd1689m',
             pretrained=True,
             features_only=True,
-            out_indices=(args.feat_layer,)  # 저수준~고수준: 0(얕은)~11(깊은) 중 선택
+            # out_indices=(args.feat_layer,)  # 저수준~고수준: 0(얕은)~11(깊은) 중 선택
         ).to(self.args.device)
         self.mask_refiner = ShallowUpDecoder().to(self.args.device)
         self.mask_refiner.load_state_dict(torch.load('/mnt/nas5/suhyeon/projects/locmark_decoder/0224_dilate_0.2/shallow_refiner_6-best.pth', map_location=self.args.device))
@@ -225,7 +225,7 @@ class LocMark:
             # masked = norm_imagenet(masked)
             # masked_1 = norm_imagenet(masked_1)
 
-            features = self.image_encoder(image)[0]
+            features = self.image_encoder(image)[self.args.feat_layer]
             # features = self.feature_upsampler(image, features, q_chunk_size=3)
             B, C, H, W = features.shape # [1, 192, 32, 32]
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
@@ -238,7 +238,7 @@ class LocMark:
                 
             noise_floor = torch.max(base_cos_sim)
 
-            features = self.image_encoder(watermarked_image)[0]
+            features = self.image_encoder(watermarked_image)[self.args.feat_layer]
             # features = self.feature_upsampler(watermarked_image, features, q_chunk_size=3)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
@@ -251,7 +251,7 @@ class LocMark:
             watermarked_image_1 = F.interpolate(watermarked_image_1, size=(img_size, img_size), mode="bilinear", align_corners=False)
             watermarked_image_1 = norm_imagenet(watermarked_image_1)
 
-            features = self.image_encoder(watermarked_image_1)[0]
+            features = self.image_encoder(watermarked_image_1)[self.args.feat_layer]
             # features = self.feature_upsampler(watermarked_image_1, features, q_chunk_size=3)
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
@@ -312,14 +312,14 @@ class LocMark:
             final_images = torch.clamp(image_512 + final_delta, 0, 1)
         return final_images.detach(), final_delta.detach() 
         
-    def decode_watermark(self, watermarked_image: torch.Tensor, use_refiner: bool = False) -> torch.Tensor:
+    def decode_watermark(self, watermarked_image: torch.Tensor, use_refiner: bool = True) -> torch.Tensor:
         watermarked_image = watermarked_image.to(self.args.device)
         smoother = torch.nn.AvgPool2d(kernel_size=3, stride=1, padding=1)
         self.mask_refiner.eval()
 
         with torch.no_grad():
             watermarked_image = norm_imagenet(watermarked_image)
-            features = self.image_encoder(watermarked_image)[0]
+            features = self.image_encoder(watermarked_image)[self.args.feat_layer]
             features = smoother(features)
             # features = self.feature_upsampler(watermarked_image, features, q_chunk_size=3)
             B, C, H, W = features.shape
