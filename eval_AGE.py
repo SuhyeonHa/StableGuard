@@ -470,7 +470,7 @@ class Evaluation_Fidelity(object):
 
 
 @torch.no_grad()
-def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, seed, num_bits=48, model_size=512, eval_size=256, start_idx=0, end_idx=None, tamper_mode='inpaint', wm_strength=None, brushnet_checkpoint_dir=None):
+def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, seed, num_bits=48, model_size=512, eval_size=256, start_idx=0, end_idx=None, tamper_mode='inpaint', wm_strength=None, brushnet_checkpoint_dir=None, segmentation_mask=False, inverse_mask=False):
     # create output subdirectories
     res = []
     if tamper_mode == 'ldm':
@@ -491,6 +491,13 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         res = ['brushnet_spliced_images', 'brushnet_spliceless_images']
     if target_model == 'clean':
         res = [r for r in res if r != 'msgs']
+
+    segm_suffix = ("_segm" if segmentation_mask else "") + ("_inverse" if inverse_mask else "")
+    res = [
+        r if r in ('cover_images', 'msgs')
+        else (f'gt{segm_suffix}' if r == 'gt' else r.replace('_images', f'{segm_suffix}_images'))
+        for r in res
+    ]
 
     for n in res:
         os.makedirs(os.path.join(save_path, '%s' % n), exist_ok=True)
@@ -624,7 +631,10 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         images = batch["images"].cuda()
         # generated_images = batch["generated_images"].cuda()
         masks = batch["masks"].cuda()
-        masks = convert_mask_to_rect(masks, scale_factor=1.2)
+        if not segmentation_mask:
+            masks = convert_mask_to_rect(masks, scale_factor=1.2)
+        if inverse_mask:
+            masks = 1 - masks
         image_names = batch["image_names"]
 
         # embed watermark
@@ -750,16 +760,16 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                 # save cover and edited images as PNG (replace .jpg extension if present)
                 if target_model != 'ours':
                     cover_image_pil.save(os.path.join(save_path, 'cover_images', save_file_name.replace("jpg", "png")))
-                spliced_image_pil.save(os.path.join(save_path, 'ldm_spliced_images', save_file_name.replace("jpg", "png")))
-                spliceless_image_pil.save(os.path.join(save_path, 'ldm_spliceless_images', save_file_name.replace("jpg", "png")))
+                spliced_image_pil.save(os.path.join(save_path, f'ldm_spliced{segm_suffix}_images', save_file_name.replace("jpg", "png")))
+                spliceless_image_pil.save(os.path.join(save_path, f'ldm_spliceless{segm_suffix}_images', save_file_name.replace("jpg", "png")))
 
                 # save ground-truth mask as image tensor and message vector as .pt file
                 if target_model == 'clean':
                     # clean 모드: gt 마스크를 eval_size(256)로 nearest resize해서 저장
                     mask_gt = F.interpolate(mask, size=(eval_size, eval_size), mode='nearest')
-                    save_image(1-mask_gt, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+                    save_image(1-mask_gt, os.path.join(save_path, f'gt{segm_suffix}', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
                 else:
-                    save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+                    save_image(1-mask, os.path.join(save_path, f'gt{segm_suffix}', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
                 # torch.save(msg, os.path.join(save_path, 'msgs', save_file_name.split(".")[0] + '.pt'))
 
         elif tamper_mode == 'controlnet':
@@ -827,16 +837,16 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                 # save cover and edited images as PNG (replace .jpg extension if present)
                 if target_model != 'ours':
                     cover_image_pil.save(os.path.join(save_path, 'cover_images', save_file_name.replace("jpg", "png")))
-                spliced_image_pil.save(os.path.join(save_path, 'control_spliced_images', save_file_name.replace("jpg", "png")))
-                spliceless_image_pil.save(os.path.join(save_path, 'control_spliceless_images', save_file_name.replace("jpg", "png")))
+                spliced_image_pil.save(os.path.join(save_path, f'control_spliced{segm_suffix}_images', save_file_name.replace("jpg", "png")))
+                spliceless_image_pil.save(os.path.join(save_path, f'control_spliceless{segm_suffix}_images', save_file_name.replace("jpg", "png")))
 
                 # save ground-truth mask as image tensor and message vector as .pt file
                 if target_model == 'clean':
                     # clean 모드: gt 마스크를 eval_size(256)로 nearest resize해서 저장
                     mask_gt = F.interpolate(mask, size=(eval_size, eval_size), mode='nearest')
-                    save_image(1-mask_gt, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+                    save_image(1-mask_gt, os.path.join(save_path, f'gt{segm_suffix}', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
                 else:
-                    save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+                    save_image(1-mask, os.path.join(save_path, f'gt{segm_suffix}', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
                 # torch.save(msg, os.path.join(save_path, 'msgs', save_file_name.split(".")[0] + '.pt'))
         
         elif tamper_mode == 'hdpainter':
@@ -910,11 +920,11 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
                 # save cover and edited images as PNG (replace .jpg extension if present)
                 # cover_image_pil.save(os.path.join(save_path, 'cover_images', save_file_name.replace("jpg", "png")))
-                spliced_image_pil.save(os.path.join(save_path, 'hdpainter_spliced_images', save_file_name.replace("jpg", "png")))
-                spliceless_image_pil.save(os.path.join(save_path, 'hdpainter_spliceless_images', save_file_name.replace("jpg", "png")))
+                spliced_image_pil.save(os.path.join(save_path, f'hdpainter_spliced{segm_suffix}_images', save_file_name.replace("jpg", "png")))
+                spliceless_image_pil.save(os.path.join(save_path, f'hdpainter_spliceless{segm_suffix}_images', save_file_name.replace("jpg", "png")))
 
                 # save ground-truth mask as image tensor and message vector as .pt file
-                save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+                save_image(1-mask, os.path.join(save_path, f'gt{segm_suffix}', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
                 # torch.save(msg, os.path.join(save_path, 'msgs', save_file_name.split(".")[0] + '.pt'))
             
         elif tamper_mode == 'zero_mask':
@@ -1017,10 +1027,10 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                 spliceless_image = (spliceless_image * 255).astype(np.uint8)
                 spliceless_image_pil = Image.fromarray(spliceless_image)
 
-                spliced_image_pil.save(os.path.join(save_path, 'sdxl_spliced_images', save_file_name.replace("jpg", "png")))
-                spliceless_image_pil.save(os.path.join(save_path, 'sdxl_spliceless_images', save_file_name.replace("jpg", "png")))
+                spliced_image_pil.save(os.path.join(save_path, f'sdxl_spliced{segm_suffix}_images', save_file_name.replace("jpg", "png")))
+                spliceless_image_pil.save(os.path.join(save_path, f'sdxl_spliceless{segm_suffix}_images', save_file_name.replace("jpg", "png")))
 
-                save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+                save_image(1-mask, os.path.join(save_path, f'gt{segm_suffix}', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
 
         elif tamper_mode == 'flux':
             # 입력을 float32로 처리하여 계산 오차와 타입 충돌 방지
@@ -1084,10 +1094,10 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                 spliceless_image = (spliceless_image * 255).astype(np.uint8)
                 spliceless_image_pil = Image.fromarray(spliceless_image)
 
-                spliced_image_pil.save(os.path.join(save_path, 'flux_spliced_images', save_file_name.replace("jpg", "png")))
-                spliceless_image_pil.save(os.path.join(save_path, 'flux_spliceless_images', save_file_name.replace("jpg", "png")))
+                spliced_image_pil.save(os.path.join(save_path, f'flux_spliced{segm_suffix}_images', save_file_name.replace("jpg", "png")))
+                spliceless_image_pil.save(os.path.join(save_path, f'flux_spliceless{segm_suffix}_images', save_file_name.replace("jpg", "png")))
 
-                save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+                save_image(1-mask, os.path.join(save_path, f'gt{segm_suffix}', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
 
         elif tamper_mode == 'brushnet':
             image_512 = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False).float()
@@ -1144,10 +1154,10 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                     return Image.fromarray((arr * 255).astype(np.uint8))
 
                 _to_pil(spliced_images[j].unsqueeze(0)).save(
-                    os.path.join(save_path, 'brushnet_spliced_images', save_file_name.replace("jpg", "png")))
+                    os.path.join(save_path, f'brushnet_spliced{segm_suffix}_images', save_file_name.replace("jpg", "png")))
                 _to_pil(spliceless_images[j].unsqueeze(0)).save(
-                    os.path.join(save_path, 'brushnet_spliceless_images', save_file_name.replace("jpg", "png")))
-                save_image(1 - mask_j, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")),
+                    os.path.join(save_path, f'brushnet_spliceless{segm_suffix}_images', save_file_name.replace("jpg", "png")))
+                save_image(1 - mask_j, os.path.join(save_path, f'gt{segm_suffix}', save_file_name.replace("jpg", "png")),
                            normalize=True, scale_each=True)
 
 
@@ -1499,6 +1509,8 @@ if __name__ == "__main__":
     c['model_size'] = c['train_img_size'][model_name]
     c['wm_strength'] = c.get('wm_strength', None)  # WAM/OmniGuard watermark strength
     c['use_refiner'] = c.get('use_refiner', True)  # ours: use mask_refiner or direct upsampling
+    c['segmentation_mask'] = c.get('segmentation_mask', False)
+    c['inverse_mask'] = c.get('inverse_mask', False)
 
     # evaluation settings based on tamper mode
     eval_setting = []
@@ -1525,6 +1537,11 @@ if __name__ == "__main__":
     if c['target_model'] == 'clean':
         eval_setting = []
 
+    if c['segmentation_mask']:
+        eval_setting = [s + "_segm" for s in eval_setting]
+    if c['inverse_mask']:
+        eval_setting = [s + "_inverse" for s in eval_setting]
+
     print("-" * 30)
     print("Running Configuration:")
     print(OmegaConf.to_yaml(final_conf))
@@ -1533,21 +1550,23 @@ if __name__ == "__main__":
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
     save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    # generate_watermark_image(norm=c['normalization'],
-    #                          weight_path=c['weight_path'],
-    #                          target_model=c['target_model'],
-    #                          src_image_path=c['src_image_path'],
-    #                          save_path=c['save_path'],
-    #                          edit_model_name=c['edit_model_name'],
-    #                          seed=c['seed'],
-    #                          num_bits=c['num_bits'],
-    #                          model_size=c['model_size'],
-    #                          eval_size=c['eval_size'],
-    #                          start_idx=c['start_idx'],
-    #                          end_idx=c['end_idx'],
-    #                          tamper_mode=c['tamper_mode'],
-    #                          wm_strength=c['wm_strength'],
-    #                          brushnet_checkpoint_dir=c.get('brushnet_checkpoint_dir', None))
+    generate_watermark_image(norm=c['normalization'],
+                             weight_path=c['weight_path'],
+                             target_model=c['target_model'],
+                             src_image_path=c['src_image_path'],
+                             save_path=c['save_path'],
+                             edit_model_name=c['edit_model_name'],
+                             seed=c['seed'],
+                             num_bits=c['num_bits'],
+                             model_size=c['model_size'],
+                             eval_size=c['eval_size'],
+                             start_idx=c['start_idx'],
+                             end_idx=c['end_idx'],
+                             tamper_mode=c['tamper_mode'],
+                             wm_strength=c['wm_strength'],
+                             brushnet_checkpoint_dir=c.get('brushnet_checkpoint_dir', None),
+                             segmentation_mask=c['segmentation_mask'],
+                             inverse_mask=c['inverse_mask'])
 
     # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     refiner_tag = '_refiner' if (c['target_model'] == 'ours' and c['use_refiner']) else ''
@@ -1567,7 +1586,9 @@ if __name__ == "__main__":
                             save_aug_image=c.get('save_aug_image', False))
         # 3) Evaluate predicted masks against ground-truth masks saved in disk
         pred_mask_dir = f"{c['save_path']}/pred_mask_{setting}{aug_suffix}{refiner_tag}"
-        eva = Evaluation(pred_mask_dir, f"{c['save_path']}/gt", eval_size=c['eval_size'], end_idx=c['end_idx'])
+        gt_dir_suffix = ("_segm" if c['segmentation_mask'] else "") + ("_inverse" if c['inverse_mask'] else "")
+        gt_dir = f"{c['save_path']}/gt{gt_dir_suffix}"
+        eva = Evaluation(pred_mask_dir, gt_dir, eval_size=c['eval_size'], end_idx=c['end_idx'])
         eva.run(pred_mask_dir, tamper_mode=c['tamper_mode'])
 
     # 4) Evaluate fidelity between watermarked and original images

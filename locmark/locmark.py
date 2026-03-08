@@ -76,8 +76,11 @@ class LocMark:
             load: True면 저장된 파일에서 로드, False면 새로 생성 후 저장
             map: True면 feature map 크기 (H*W, C)로 생성, False면 (1, C)로 생성
         """
-        map_suffix = f'_map_{self.args.feat_map_size}' if map else ''
-        vec_path = f'/mnt/nas5/suhyeon/projects/freq-loc/anchor_{feature_dim}{map_suffix}.pt'
+        if map:
+            map_suffix = f'_map_{self.args.feat_map_size}'
+            vec_path = f'/mnt/nas5/suhyeon/projects/freq-loc/anchor_{feature_dim}{map_suffix}.pt'
+        else:
+            vec_path = f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{feature_dim}.pt'
 
         if load:
             return torch.load(vec_path, map_location=self.args.device)

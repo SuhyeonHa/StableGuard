@@ -53,3 +53,9 @@ use_refiner: true
 
 # ours only: compute cossim distribution (wm/clean/inpainted inside-outside)
 eval_dist: false
+
+# use original segmentation masks (True) or convert to bounding rectangles (False)
+segmentation_mask: false
+
+# invert the mask (1-mask) before compositing (True) or use as-is (False)
+inverse_mask: false
