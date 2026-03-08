@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-locmark-steps-50
+  name: suhyeon-train-locmark-steps-100
 spec:
   template:
     spec:
