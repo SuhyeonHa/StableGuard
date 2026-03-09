@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-eval-wam
+  name: suhyeon-eval-omniguard
 spec:
   template:
     spec:
