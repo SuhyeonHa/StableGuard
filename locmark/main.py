@@ -40,7 +40,7 @@ class Params:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0049.png'
-        self.exp_name = 'supp-psnr-0.2'
+        self.exp_name = 'supp-psnr-0.15'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
         self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark_table_1/ours' # NOTE: multi image optimization, exp_name
         # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
@@ -69,7 +69,7 @@ class Params:
         # --- Optimization Parameters ---
         self.lr = 1.0
         self.steps = 150
-        self.lambda_p = 0.2 #0.1 #0.05 #0.025
+        self.lambda_p = 0.15 #0.1 #0.05 #0.025
         self.lambda_i = 0.05 #0.05 #0.01 #0.005
         self.feat_layer = 1
         # self.feat_layer = 3 # for vit model
