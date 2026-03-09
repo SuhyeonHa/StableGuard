@@ -16,7 +16,7 @@ for mode in "${TAMPER_MODELS[@]}"; do
         eval_size=256 \
         start_idx=0 \
         end_idx=100 \
-        tamper_mode=$TAMPER_MODEL \
+        tamper_mode=$mode \
         wm_strength=3.0 \
         segmentation_mask=True
 
