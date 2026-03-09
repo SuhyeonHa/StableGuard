@@ -14,7 +14,7 @@ for mode in "${TAMPER_MODELS[@]}"; do
         edit_model_name=sd-legacy/stable-diffusion-inpainting \
         eval_size=256 \
         start_idx=0 \
-        end_idx=$NUM_IMG \
+        end_idx=100 \
         tamper_mode=$TAMPER_MODEL \
         wm_strength=3.0 \
         segmentation_mask=True
