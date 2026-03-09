@@ -7,6 +7,7 @@ for mode in "${TAMPER_MODELS[@]}"; do
     echo "Running eval_AGE.py with tamper_mode: $mode"
     echo "=================================================="
 
+    # wam
     python eval_AGE.py \
         target_model=wam \
         src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
@@ -18,5 +19,29 @@ for mode in "${TAMPER_MODELS[@]}"; do
         tamper_mode=$TAMPER_MODEL \
         wm_strength=3.0 \
         segmentation_mask=True
+
+    # omniguard
+    # python eval_AGE.py \
+    #     target_model=omniguard \
+    #     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
+    #     save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/omniguard \
+    #     edit_model_name=sd-legacy/stable-diffusion-inpainting \
+    #     eval_size=256 \
+    #     start_idx=0 \
+    #     end_idx=100 \
+    #     tamper_mode=$TAMPER_MODEL \
+    #     wm_strength=2.0 \
+    #     segmentation_mask=True
+
+    # python eval_AGE.py \
+    #     target_model=stableguard \
+    #     src_image_path=/mnt/nas5/suhyeon/datasets/valAGE-Set \
+    #     save_path=/mnt/nas5/suhyeon/projects/locmark_table_1/stableguard \
+    #     edit_model_name=sd-legacy/stable-diffusion-inpainting \
+    #     eval_size=256 \
+    #     start_idx=0 \
+    #     end_idx=$NUM_IMG \
+    #     tamper_mode=$TAMPER_MODEL \
+    #     segmentation_mask=True
 
 done
