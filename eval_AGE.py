@@ -1542,6 +1542,8 @@ if __name__ == "__main__":
     if c['inverse_mask']:
         eval_setting = [s + "_inverse" for s in eval_setting]
 
+    print(f"Eval_setting: {eval_setting}")
+
     print("-" * 30)
     print("Running Configuration:")
     print(OmegaConf.to_yaml(final_conf))
