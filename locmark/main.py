@@ -81,7 +81,7 @@ class Params:
         
         # --- Anchor Parameters ---
         self.load_anchor = True
-        self.anchor_map = True
+        self.anchor_map = False
 
         # --- Demo/Evaluation Parameters ---
         # vit_small_patch16: embed_dim=384, constant across all layers (feat_layer 0~11)
