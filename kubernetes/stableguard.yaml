@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-eval-stableguard
+  name: suhyeon-eval-ours
 spec:
   template:
     spec:
