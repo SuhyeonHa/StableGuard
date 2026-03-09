@@ -69,7 +69,7 @@ class LocMark:
         self.loss_fn_vgg = lpips.LPIPS(net='alex').to(self.args.device)
         self.loss_fn_vgg.eval()
 
-    def generate_universal_vectors(self, feature_dim, load=False, map=False):
+    def generate_universal_vectors(self, feature_dim, load=True, map=False):
         """
         Universal direction vectors 생성 또는 로드.
 
@@ -78,6 +78,7 @@ class LocMark:
             load: True면 저장된 파일에서 로드, False면 새로 생성 후 저장
             map: True면 feature map 크기 (H*W, C)로 생성, False면 (1, C)로 생성
         """
+        print(f"Generating universal vectors (feature_dim={feature_dim}, load={load}, map={map})")
         if map:
             map_suffix = f'_map_{self.args.feat_map_size}'
             vec_path = f'/mnt/nas5/suhyeon/projects/freq-loc/anchor_{feature_dim}{map_suffix}.pt'

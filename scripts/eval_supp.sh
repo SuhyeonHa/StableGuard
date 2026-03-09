@@ -6,11 +6,22 @@
 #     "ours/supp-steps-200/20260308-083855"
 # )
 
+# target_dirs=(
+#     "ours/hinge-hard-noise-eps-12/20260228-205531"
+#     "ours/hinge-hard-noise-eps-20/20260228-205659"
+#     "ours/hinge-hard-noise-target-0.15/20260228-204847"
+#     "ours/hinge-hard-noise-target-0.2/20260228-205133"
+# )
+
+# target_dirs=(
+#     "ours/supp-target-0.05/20260308-141050"
+#     "ours/supp-psnr-0.025/20260308-144231"
+#     "ours/supp-psnr-0.05/20260308-144108"
+#     "ours/supp-psnr-0.2/20260308-144449"
+# )
+
 target_dirs=(
-    "ours/hinge-hard-noise-eps-12/20260228-205531"
-    "ours/hinge-hard-noise-eps-20/20260228-205659"
-    "ours/hinge-hard-noise-target-0.15/20260228-204847"
-    "ours/hinge-hard-noise-target-0.2/20260228-205133"
+    "ours/supp-anchor-map/20260307-124022"
 )
 
 
@@ -31,5 +42,6 @@ do
         start_idx=0 \
         end_idx=100 \
         tamper_mode=ldm \
-        use_refiner=False
+        use_refiner=False \
+        anchor_map=True
 done
