@@ -321,7 +321,7 @@ class LocMark:
         with torch.no_grad():
             watermarked_image = norm_imagenet(watermarked_image)
             features = self.image_encoder(watermarked_image)[self.args.feat_layer]
-            features = smoother(features)
+            # features = smoother(features)
             # features = self.feature_upsampler(watermarked_image, features, q_chunk_size=3)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)

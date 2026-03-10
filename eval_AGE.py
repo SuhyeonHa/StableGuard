@@ -634,6 +634,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         if not segmentation_mask:
             masks = convert_mask_to_rect(masks, scale_factor=1.2)
         if inverse_mask:
+            masks = convert_mask_to_rect(masks, scale_factor=2.0)
             masks = 1 - masks
         image_names = batch["image_names"]
 

@@ -71,5 +71,5 @@ for r in range(rows):
                     ha='center', va='top', fontsize=24)
 
 # 결과 저장
-plt.savefig('fig_fig1_all.png', dpi=300, bbox_inches='tight')
+plt.savefig('fig_fig1_all.pdf', dpi=300, bbox_inches='tight')
 # plt.show()

@@ -61,7 +61,7 @@ def plot_perturbations_horizontal(dir_orig, dir_pert, filenames):
     plt.subplots_adjust(left=0.1, right=0.98, top=0.98, bottom=0.02, 
                         wspace=0.03, hspace=0.03)
 
-    save_path = "fig_diff.png"
+    save_path = "fig_diff.pdf"
     plt.savefig(save_path, dpi=200, bbox_inches='tight')
     print(f"Figure saved to: {save_path}")
 
