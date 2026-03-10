@@ -316,7 +316,7 @@ class LocMark:
             final_images = torch.clamp(image_512 + final_delta, 0, 1)
         return final_images.detach(), final_delta.detach() 
         
-    def decode_watermark(self, watermarked_image: torch.Tensor, use_refiner: bool = True) -> torch.Tensor:
+    def decode_watermark(self, watermarked_image: torch.Tensor, use_refiner: bool = False) -> torch.Tensor:
         watermarked_image = watermarked_image.to(self.args.device)
         smoother = torch.nn.AvgPool2d(kernel_size=3, stride=1, padding=1)
         self.mask_refiner.eval()
