@@ -32,7 +32,7 @@
 # )
 
 target_dirs=(
-    "ours/supp-vit/20260308-114515"
+    "ours/supp-vit-l5/20260310-110335"
 )
 
 base_prefix="/mnt/nas5/suhyeon/projects/locmark_table_1"
@@ -52,5 +52,5 @@ do
         start_idx=0 \
         end_idx=100 \
         tamper_mode=ldm \
-        use_refiner=True
+        use_refiner=False
 done
