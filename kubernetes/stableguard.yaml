@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-aug-0.5
+  name: suhyeon-train-aug-0.25
 spec:
   template:
     spec:
