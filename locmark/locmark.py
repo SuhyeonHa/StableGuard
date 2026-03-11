@@ -181,7 +181,10 @@ class LocMark:
             optimizer.zero_grad()
 
             # ── 매 step: aug 종류 및 파라미터 무작위 샘플링 ──
-            aug_transform = sample_random_aug_transform(image_size=img_size) if use_random_aug else None
+            aug_transform = sample_random_aug_transform(
+                image_size=img_size,
+                strength=getattr(self.args, 'aug_strength', 1.0),
+            ) if use_random_aug else None
 
             original_mask = self._create_random_mask(image, num_masks=1, mask_percentage=self.args.mask_percentage)
             original_mask = original_mask.to(self.args.device)

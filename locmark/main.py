@@ -79,6 +79,7 @@ class Params:
         self.eps0_std = [0.0, 0.25] # Latent noise sigma range
         self.aug_noise_std = [0.0, 0.025] # Image-space Gaussian noise sigma range in [0,1]
         self.aug_type = 'random'  # None=비활성화, 'random'=매 step 무작위 aug 샘플링
+        self.aug_strength = 0.5   # aug 강도 [0.0=identity, 1.0=WAM full range]
         
         # --- Anchor Parameters ---
         self.load_anchor = True
