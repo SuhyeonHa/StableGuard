@@ -71,8 +71,8 @@ class Params:
         self.steps = 150
         self.lambda_p = 0.1 #0.1 #0.05 #0.025
         self.lambda_i = 0.05 #0.05 #0.01 #0.005
-        # self.feat_layer = 1
-        self.feat_layer = 5 # for vit model
+        self.feat_layer = 1
+        # self.feat_layer = 5 # for vit model
         self.epsilon = 16/255
 
         # --- Robustness Parameters ---
@@ -86,29 +86,29 @@ class Params:
 
         # --- Demo/Evaluation Parameters ---
         # vit_small_patch16: embed_dim=384, constant across all layers (feat_layer 0~11)
-        self.feature_dim = 384
+        # self.feature_dim = 384
         # convnext_small (기존) - feat_layer별로 상이 (feat_layer 0~3):
-        # self.feature_dim = None
-        # if self.feat_layer == 0:
-        #     self.feature_dim = 96
-        # elif self.feat_layer == 1:
-        #     self.feature_dim = 192
-        # elif self.feat_layer == 2:
-        #     self.feature_dim = 384
-        # elif self.feat_layer == 3:
-        #     self.feature_dim = 768
+        self.feature_dim = None
+        if self.feat_layer == 0:
+            self.feature_dim = 96
+        elif self.feat_layer == 1:
+            self.feature_dim = 192
+        elif self.feat_layer == 2:
+            self.feature_dim = 384
+        elif self.feat_layer == 3:
+            self.feature_dim = 768
 
         # vit_small_patch16: patch_size=16, image_size//16=16 (256x256 입력 기준), constant across all layers
-        self.feat_map_size = self.image_size // 16
+        # self.feat_map_size = self.image_size // 16
         # convnext_small (기존) - feat_layer별로 상이:
-        # if self.feat_layer == 0:
-        #     self.feat_map_size = 64
-        # elif self.feat_layer == 1:
-        #     self.feat_map_size = 32
-        # elif self.feat_layer == 2:
-        #     self.feat_map_size = 16
-        # elif self.feat_layer == 3:
-        #     self.feat_map_size = 8
+        if self.feat_layer == 0:
+            self.feat_map_size = 64
+        elif self.feat_layer == 1:
+            self.feat_map_size = 32
+        elif self.feat_layer == 2:
+            self.feat_map_size = 16
+        elif self.feat_layer == 3:
+            self.feat_map_size = 8
 
 def run_locmark(args=None, save_dir=None):
     """Run complete LocMark demonstration"""
