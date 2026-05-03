@@ -7,7 +7,7 @@ DATASET=/mnt/nas5/suhyeon/datasets/valAGE-Set
 SAVE_BASE=/mnt/nas5/suhyeon/projects/apt_rebuttal
 
 # ours (LocMark, with refiner)
-CUDA_VISIBLE_DEVICES=1 python eval_AGE.py \
+CUDA_VISIBLE_DEVICES=0 python eval_AGE.py \
     target_model=ours \
     src_image_path=$DATASET \
     save_path=$SAVE_BASE/ours \
