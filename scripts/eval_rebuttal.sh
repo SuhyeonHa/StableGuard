@@ -7,15 +7,15 @@ DATASET=/mnt/nas5/suhyeon/datasets/valAGE-Set
 SAVE_BASE=/mnt/nas5/suhyeon/projects/apt_rebuttal
 
 # ours (LocMark, with refiner)
-CUDA_VISIBLE_DEVICES=0 python eval_AGE.py \
-    target_model=ours \
-    src_image_path=$DATASET \
-    save_path=$SAVE_BASE/ours \
-    eval_size=256 \
-    start_idx=0 \
-    end_idx=$NUM_IMG \
-    tamper_mode=$TAMPER_MODE \
-    use_refiner=True
+# CUDA_VISIBLE_DEVICES=0 python eval_AGE.py \
+#     target_model=ours \
+#     src_image_path=$DATASET \
+#     save_path=$SAVE_BASE/ours \
+#     eval_size=256 \
+#     start_idx=0 \
+#     end_idx=$NUM_IMG \
+#     tamper_mode=$TAMPER_MODE \
+#     use_refiner=True
 
 # # ours_e2e (LocMark end-to-end)
 # CUDA_VISIBLE_DEVICES=0 python eval_AGE.py \
@@ -28,15 +28,15 @@ CUDA_VISIBLE_DEVICES=0 python eval_AGE.py \
 #     tamper_mode=$TAMPER_MODE
 
 # # wam
-# CUDA_VISIBLE_DEVICES=0 python eval_AGE.py \
-#     target_model=wam \
-#     src_image_path=$DATASET \
-#     save_path=$SAVE_BASE/wam \
-#     eval_size=256 \
-#     start_idx=0 \
-#     end_idx=$NUM_IMG \
-#     tamper_mode=$TAMPER_MODE \
-#     wm_strength=3.0
+CUDA_VISIBLE_DEVICES=0 python eval_AGE.py \
+    target_model=wam \
+    src_image_path=$DATASET \
+    save_path=$SAVE_BASE/wam \
+    eval_size=256 \
+    start_idx=0 \
+    end_idx=$NUM_IMG \
+    tamper_mode=$TAMPER_MODE \
+    wm_strength=3.0
 
 # # omniguard
 # CUDA_VISIBLE_DEVICES=0 python eval_AGE.py \

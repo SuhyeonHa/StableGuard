@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-eval-flux-ours
+  name: suhyeon-eval-flux-wam
 spec:
   template:
     spec:
