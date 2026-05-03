@@ -13,6 +13,9 @@ from tqdm import tqdm
 import cv2
 import numpy as np
 from diffusers import AutoencoderKL, StableDiffusionInpaintPipeline, AutoPipelineForInpainting, FluxFillPipeline
+from diffusers.pipelines import StableDiffusion3ControlNetInpaintingPipeline
+from diffusers import SD3ControlNetModel
+from diffusers import QwenImageControlNetModel, QwenImageControlNetInpaintPipeline
 # from diffusers import Flux2KleinInpaintPipeline  # requires diffusers dev (0.38.0+)
 import torch
 from torch.utils.data import DataLoader
@@ -488,6 +491,10 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         res = ['sdxl_spliced_images', 'sdxl_spliceless_images']
     elif tamper_mode == 'flux':
         res = ['flux_spliced_images', 'flux_spliceless_images']
+    elif tamper_mode == 'sdv3':
+        res = ['sdv3_spliced_images', 'sdv3_spliceless_images']
+    elif tamper_mode == 'qwen':
+        res = ['qwen_spliced_images', 'qwen_spliceless_images']
     # elif tamper_mode == 'flux2':
     #     res = ['cover_images', 'flux2_spliced_images', 'flux2_spliceless_images', 'gt', 'msgs']
     elif tamper_mode == 'brushnet':
@@ -533,6 +540,34 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             cache_dir='/mnt/nas5/suhyeon/caches/',
         )
         pipe.enable_model_cpu_offload()
+    elif tamper_mode == 'sdv3':
+        controlnet = SD3ControlNetModel.from_pretrained(
+            "alimama-creative/SD3-Controlnet-Inpainting",
+            use_safetensors=True,
+            extra_conditioning_channels=1,
+            torch_dtype=torch.float16,
+            cache_dir='/mnt/nas5/suhyeon/caches/',
+        )
+        pipe = StableDiffusion3ControlNetInpaintingPipeline.from_pretrained(
+            "stabilityai/stable-diffusion-3-medium-diffusers",
+            controlnet=controlnet,
+            torch_dtype=torch.float16,
+            cache_dir='/mnt/nas5/suhyeon/caches/',
+        )
+        pipe.enable_model_cpu_offload()
+    elif tamper_mode == 'qwen':
+        controlnet = QwenImageControlNetModel.from_pretrained(
+            "InstantX/Qwen-Image-ControlNet-Inpainting",
+            torch_dtype=torch.bfloat16,
+            cache_dir='/mnt/nas5/suhyeon/caches/',
+        )
+        pipe = QwenImageControlNetInpaintPipeline.from_pretrained(
+            "Qwen/Qwen-Image",
+            controlnet=controlnet,
+            torch_dtype=torch.bfloat16,
+            cache_dir='/mnt/nas5/suhyeon/caches/',
+        )
+        pipe.enable_sequential_cpu_offload()
     # elif tamper_mode == 'flux2':
     #     pipe = Flux2KleinInpaintPipeline.from_pretrained(
     #         "black-forest-labs/FLUX.2-klein-4B",
@@ -1095,6 +1130,111 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         # elif tamper_mode == 'flux2':  # requires diffusers dev (0.38.0+) and Flux2KleinInpaintPipeline
         #     ...  (see git history)
 
+        elif tamper_mode == 'sdv3':
+            image_512 = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False).float()
+            mask_512 = F.interpolate(masks, size=(512, 512), mode='nearest').float()
+
+            inpaint_input_np = (image_512 / 2 + 0.5).clamp(0, 1)
+            inpaint_input_np = inpaint_input_np.squeeze(0).cpu().permute(1, 2, 0).numpy()
+            inpaint_input_pil = Image.fromarray((inpaint_input_np * 255).astype(np.uint8)).convert('RGB')
+
+            inpaint_mask_np = mask_512.squeeze(0).squeeze(0).cpu().numpy()
+            inpaint_mask_pil = Image.fromarray((inpaint_mask_np * 255).astype(np.uint8)).convert('L')
+
+            generated_images = pipe(
+                prompt="",
+                negative_prompt="deformed, distorted, disfigured, poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands and fingers, disconnected limbs, mutation, mutated, ugly, disgusting, blurry, amputation, NSFW",
+                height=512,
+                width=512,
+                control_image=inpaint_input_pil,
+                control_mask=inpaint_mask_pil,
+                num_inference_steps=28,
+                generator=torch.Generator(device="cuda").manual_seed(seed + i),
+                controlnet_conditioning_scale=0.95,
+                guidance_scale=7,
+            ).images[0]
+
+            generated_images = ToTensor()(generated_images).cuda().float()
+            generated_images = (generated_images * 2.0 - 1.0).unsqueeze(0)
+
+            spliced_images = mask_512 * generated_images + (1 - mask_512) * image_512
+            spliceless_images = generated_images
+
+            spliced_images = F.interpolate(spliced_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+            spliceless_images = F.interpolate(spliceless_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+            cover_images = F.interpolate(cover_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+
+            for i in range(images.size(0)):
+                save_file_name = image_names[i]
+                spliced_image = spliced_images[i].unsqueeze(0)
+                spliceless_image = spliceless_images[i].unsqueeze(0)
+                mask = masks[i].unsqueeze(0)
+
+                spliced_image = (spliced_image / 2 + 0.5).clamp(0, 1)
+                spliced_image = spliced_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                spliced_image_pil = Image.fromarray((spliced_image * 255).astype(np.uint8))
+
+                spliceless_image = (spliceless_image / 2 + 0.5).clamp(0, 1)
+                spliceless_image = spliceless_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                spliceless_image_pil = Image.fromarray((spliceless_image * 255).astype(np.uint8))
+
+                spliced_image_pil.save(os.path.join(save_path, 'sdv3_spliced_images', save_file_name.replace("jpg", "png")))
+                spliceless_image_pil.save(os.path.join(save_path, 'sdv3_spliceless_images', save_file_name.replace("jpg", "png")))
+
+                save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+
+        elif tamper_mode == 'qwen':
+            image_256 = F.interpolate(cover_images, size=(256, 256), mode="bilinear", align_corners=False).float()
+            mask_256 = F.interpolate(masks, size=(256, 256), mode='nearest').float()
+
+            inpaint_input_np = (image_256 / 2 + 0.5).clamp(0, 1)
+            inpaint_input_np = inpaint_input_np.squeeze(0).cpu().permute(1, 2, 0).numpy()
+            inpaint_input_pil = Image.fromarray((inpaint_input_np * 255).astype(np.uint8)).convert('RGB')
+
+            inpaint_mask_np = mask_256.squeeze(0).squeeze(0).cpu().numpy()
+            inpaint_mask_pil = Image.fromarray((inpaint_mask_np * 255).astype(np.uint8)).convert('L')
+
+            generated_images = pipe(
+                prompt="",
+                negative_prompt=" ",
+                height=256,
+                width=256,
+                control_image=inpaint_input_pil,
+                control_mask=inpaint_mask_pil,
+                num_inference_steps=30,
+                true_cfg_scale=4.0,
+                generator=torch.Generator(device="cuda").manual_seed(seed + i),
+            ).images[0]
+
+            generated_images = ToTensor()(generated_images).cuda().float()
+            generated_images = (generated_images * 2.0 - 1.0).unsqueeze(0)
+
+            spliced_images = mask_256 * generated_images + (1 - mask_256) * image_256
+            spliceless_images = generated_images
+
+            spliced_images = F.interpolate(spliced_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+            spliceless_images = F.interpolate(spliceless_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+            cover_images = F.interpolate(cover_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+
+            for i in range(images.size(0)):
+                save_file_name = image_names[i]
+                spliced_image = spliced_images[i].unsqueeze(0)
+                spliceless_image = spliceless_images[i].unsqueeze(0)
+                mask = masks[i].unsqueeze(0)
+
+                spliced_image = (spliced_image / 2 + 0.5).clamp(0, 1)
+                spliced_image = spliced_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                spliced_image_pil = Image.fromarray((spliced_image * 255).astype(np.uint8))
+
+                spliceless_image = (spliceless_image / 2 + 0.5).clamp(0, 1)
+                spliceless_image = spliceless_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                spliceless_image_pil = Image.fromarray((spliceless_image * 255).astype(np.uint8))
+
+                spliced_image_pil.save(os.path.join(save_path, 'qwen_spliced_images', save_file_name.replace("jpg", "png")))
+                spliceless_image_pil.save(os.path.join(save_path, 'qwen_spliceless_images', save_file_name.replace("jpg", "png")))
+
+                save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+
         elif tamper_mode == 'brushnet':
             image_512 = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False).float()
             mask_512  = F.interpolate(masks, size=(512, 512), mode='nearest').float()
@@ -1524,6 +1664,10 @@ if __name__ == "__main__":
         eval_setting = ["flux_spliced", "flux_spliceless"]
     # elif c['tamper_mode'] == 'flux2':
     #     eval_setting = ["flux2_spliced", "flux2_spliceless"]
+    elif c['tamper_mode'] == 'sdv3':
+        eval_setting = ["sdv3_spliced", "sdv3_spliceless"]
+    elif c['tamper_mode'] == 'qwen':
+        eval_setting = ["qwen_spliced", "qwen_spliceless"]
     elif c['tamper_mode'] == 'brushnet':
         eval_setting = ["brushnet_spliced", "brushnet_spliceless"]
     elif c['tamper_mode'] == 'cover':
@@ -1579,8 +1723,8 @@ if __name__ == "__main__":
         eva.run(pred_mask_dir, tamper_mode=c['tamper_mode'])
 
     # 4) Evaluate fidelity between watermarked and original images
-    eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'], end_idx=c['end_idx'])
-    eva_fid.run(f"{c['save_path']}/cover_images")
+    # eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'], end_idx=c['end_idx'])
+    # eva_fid.run(f"{c['save_path']}/cover_images")
 
     # 5) eval_dist: cossim distribution analysis (ours only)
     # if c.get('eval_dist', False) and c['target_model'] == 'ours':
