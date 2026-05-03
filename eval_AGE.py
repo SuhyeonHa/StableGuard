@@ -567,7 +567,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             torch_dtype=torch.bfloat16,
             cache_dir='/mnt/nas5/suhyeon/caches/',
         )
-        pipe.enable_sequential_cpu_offload()
+        pipe.enable_model_cpu_offload()
     # elif tamper_mode == 'flux2':
     #     pipe = Flux2KleinInpaintPipeline.from_pretrained(
     #         "black-forest-labs/FLUX.2-klein-4B",
