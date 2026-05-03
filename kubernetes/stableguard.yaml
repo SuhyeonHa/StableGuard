@@ -11,7 +11,7 @@ spec:
         nvidia.com/gpu.product: NVIDIA-GeForce-RTX-3090
       
       # Uncomment below if you want to use a specific node
-      nodeName: sgvr-gpu-021
+      nodeName: sgvr-gpu-017
 
       # Uncomment below if you want to use a GPU device with memory > 15000
       # affinity:
