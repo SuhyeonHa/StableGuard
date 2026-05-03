@@ -13,6 +13,7 @@ from tqdm import tqdm
 import cv2
 import numpy as np
 from diffusers import AutoencoderKL, StableDiffusionInpaintPipeline, AutoPipelineForInpainting, FluxFillPipeline
+# from diffusers import Flux2KleinInpaintPipeline  # requires diffusers dev (0.38.0+)
 import torch
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
@@ -20,7 +21,7 @@ from torchvision.transforms import transforms, ToTensor
 from piq import ssim, psnr, LPIPS
 import sys
 import json
-from transformers import T5EncoderModel
+from transformers import T5EncoderModel, BitsAndBytesConfig
 
 from evaluation import PixelF1, PixelAUC, PixelIOU, PixelAccuracy
 from dataset import age_collate_fn, AGEDataset
@@ -487,6 +488,8 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         res = ['sdxl_spliced_images', 'sdxl_spliceless_images']
     elif tamper_mode == 'flux':
         res = ['flux_spliced_images', 'flux_spliceless_images']
+    # elif tamper_mode == 'flux2':
+    #     res = ['cover_images', 'flux2_spliced_images', 'flux2_spliceless_images', 'gt', 'msgs']
     elif tamper_mode == 'brushnet':
         res = ['brushnet_spliced_images', 'brushnet_spliceless_images']
     if target_model == 'clean':
@@ -524,19 +527,19 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             safety_checker=None
         ).to("cuda")
     elif tamper_mode == 'flux':
-        text_encoder_2 = T5EncoderModel.from_pretrained(
-            "black-forest-labs/FLUX.1-Fill-dev",
-            subfolder="text_encoder_2",
-            load_in_8bit=True,
-            device_map="auto"
-        )
         pipe = FluxFillPipeline.from_pretrained(
             "black-forest-labs/FLUX.1-Fill-dev",
-            text_encoder_2=text_encoder_2,
-            dtype=torch.bfloat16,
+            torch_dtype=torch.bfloat16,
             cache_dir='/mnt/nas5/suhyeon/caches/',
         )
-        pipe.enable_model_cpu_offload()
+        pipe.enable_sequential_cpu_offload()
+    # elif tamper_mode == 'flux2':
+    #     pipe = Flux2KleinInpaintPipeline.from_pretrained(
+    #         "black-forest-labs/FLUX.2-klein-4B",
+    #         torch_dtype=torch.bfloat16,
+    #         cache_dir='/mnt/nas5/suhyeon/caches/',
+    #     )
+    #     pipe.enable_model_cpu_offload()
     elif tamper_mode == 'brushnet':
         _bn_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "BrushNet", "src")
         # BrushNet requires its own modified diffusers (UNet with down_block_add_samples).
@@ -1044,12 +1047,12 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                 width=512,
                 guidance_scale=30,
                 num_inference_steps=50,
-                # dtype 충돌을 피하기 위해 generator를 명시적으로 설정
+                max_sequence_length=512,
                 generator=torch.Generator("cpu").manual_seed(seed + i)
             ).images[0]
 
             # 4. PIL → tensor [-1,1] 및 타입 통일
-            generated_images = ToTensor()(generated_images_pil).cuda().float()
+            generated_images = ToTensor()(generated_images).cuda().float()
             generated_images = (generated_images * 2.0 - 1.0).unsqueeze(0)
 
             # 5. 합성 (모두 float32/GPU 상태이므로 안전함)
@@ -1088,6 +1091,9 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                 spliceless_image_pil.save(os.path.join(save_path, 'flux_spliceless_images', save_file_name.replace("jpg", "png")))
 
                 save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+
+        # elif tamper_mode == 'flux2':  # requires diffusers dev (0.38.0+) and Flux2KleinInpaintPipeline
+        #     ...  (see git history)
 
         elif tamper_mode == 'brushnet':
             image_512 = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False).float()
@@ -1516,6 +1522,8 @@ if __name__ == "__main__":
         eval_setting = ["sdxl_spliced", "sdxl_spliceless"]
     elif c['tamper_mode'] == 'flux':
         eval_setting = ["flux_spliced", "flux_spliceless"]
+    # elif c['tamper_mode'] == 'flux2':
+    #     eval_setting = ["flux2_spliced", "flux2_spliceless"]
     elif c['tamper_mode'] == 'brushnet':
         eval_setting = ["brushnet_spliced", "brushnet_spliceless"]
     elif c['tamper_mode'] == 'cover':
@@ -1533,21 +1541,21 @@ if __name__ == "__main__":
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
     save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    # generate_watermark_image(norm=c['normalization'],
-    #                          weight_path=c['weight_path'],
-    #                          target_model=c['target_model'],
-    #                          src_image_path=c['src_image_path'],
-    #                          save_path=c['save_path'],
-    #                          edit_model_name=c['edit_model_name'],
-    #                          seed=c['seed'],
-    #                          num_bits=c['num_bits'],
-    #                          model_size=c['model_size'],
-    #                          eval_size=c['eval_size'],
-    #                          start_idx=c['start_idx'],
-    #                          end_idx=c['end_idx'],
-    #                          tamper_mode=c['tamper_mode'],
-    #                          wm_strength=c['wm_strength'],
-    #                          brushnet_checkpoint_dir=c.get('brushnet_checkpoint_dir', None))
+    generate_watermark_image(norm=c['normalization'],
+                             weight_path=c['weight_path'],
+                             target_model=c['target_model'],
+                             src_image_path=c['src_image_path'],
+                             save_path=c['save_path'],
+                             edit_model_name=c['edit_model_name'],
+                             seed=c['seed'],
+                             num_bits=c['num_bits'],
+                             model_size=c['model_size'],
+                             eval_size=c['eval_size'],
+                             start_idx=c['start_idx'],
+                             end_idx=c['end_idx'],
+                             tamper_mode=c['tamper_mode'],
+                             wm_strength=c['wm_strength'],
+                             brushnet_checkpoint_dir=c.get('brushnet_checkpoint_dir', None))
 
     # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     refiner_tag = '_refiner' if (c['target_model'] == 'ours' and c['use_refiner']) else ''
@@ -1571,8 +1579,8 @@ if __name__ == "__main__":
         eva.run(pred_mask_dir, tamper_mode=c['tamper_mode'])
 
     # 4) Evaluate fidelity between watermarked and original images
-    # eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'], end_idx=c['end_idx'])
-    # eva_fid.run(f"{c['save_path']}/cover_images")
+    eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'], end_idx=c['end_idx'])
+    eva_fid.run(f"{c['save_path']}/cover_images")
 
     # 5) eval_dist: cossim distribution analysis (ours only)
     # if c.get('eval_dist', False) and c['target_model'] == 'ours':

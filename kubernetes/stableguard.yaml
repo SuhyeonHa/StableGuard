@@ -1,17 +1,17 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-train-locmark-eps-20
+  name: suhyeon-eval-flux-ours
 spec:
   template:
     spec:
       runtimeClassName: nvidia
       # Uncomment this node Selector if you want to use a specific GPU type
       nodeSelector:
-        nvidia.com/gpu.product: NVIDIA-GeForce-RTX-4090
+        nvidia.com/gpu.product: NVIDIA-GeForce-RTX-3090
       
       # Uncomment below if you want to use a specific node
-      nodeName: sgvr-gpu-024
+      nodeName: sgvr-gpu-021
 
       # Uncomment below if you want to use a GPU device with memory > 15000
       # affinity:

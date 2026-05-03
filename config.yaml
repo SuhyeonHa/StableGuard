@@ -9,7 +9,7 @@ end_idx: 100
 aug_type: null
 aug_param: null
 save_aug_image: false
-tamper_mode: "ldm" # ["ldm", "controlnet", "hdpainter", "zero_mask", "vae_regen", "sdxl", "flux", "brushnet"]
+tamper_mode: "ldm" # ["ldm", "controlnet", "hdpainter", "zero_mask", "vae_regen", "sdxl", "flux", "flux2", "brushnet"]
 brushnet_checkpoint_dir: "/mnt/nas5/suhyeon/checkpoints/brushnet"
 
 weight_paths:

@@ -8,7 +8,7 @@ set -e
 
 # copy workspace from private git repo
 GIT_REPO="StableGuard"
-GIT_BRANCH="exp/uni_setup"
+GIT_BRANCH="exp/rebuttal"
 TOKEN_FILE="/mnt/nas5/suhyeon/tokens/github_token.txt"
 HF_TOKEN_FILE="/mnt/nas5/suhyeon/tokens/hf_token.txt"
 
@@ -26,7 +26,8 @@ echo "Clone complete."
 pip install -U bitsandbytes
 
 # python eval_AGE.py
-python -m locmark.main
+# python -m locmark.main
 # python analysis_layers.py
 # bash scripts/eval.sh
 # python -m locmark.train_decoder
+bash scripts/eval_rebuttal.sh

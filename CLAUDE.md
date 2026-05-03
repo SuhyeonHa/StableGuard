@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-LocMark is a local watermarking method for tamper localization in images. It embeds watermarks via latent space optimization using direction vectors and cosine similarity, enabling detection of tampered regions without requiring binary message encoding.
+This repository contains **StableGuard** (NeurIPS 2025) — a framework for AI-generated image tamper localization using watermarking. The repo includes the proposed **LocMark** method (latent-space optimization with direction vectors) and three baselines: StableGuard (MPW-VAE + MoE-GFN), OmniGuard, and WAM (Watermark Anything).
 
 ## Common Commands
 
@@ -22,9 +22,10 @@ python -m locmark.main
 ```
 Configuration is in `locmark/main.py` via the `Params` class. Key parameters:
 - `single_image_mode`: True for single image, False for batch processing
-- `epsilon`: L1 perturbation budget (e.g., 13500)
-- `steps`: Optimization steps (default 300)
-- `target_cossim`: Target cosine similarity threshold (default 0.2)
+- `epsilon`: L1 perturbation budget (default `16/255`)
+- `steps`: Optimization steps (default 150)
+- `target_cossim`: Target cosine similarity threshold (default 0.1)
+- `feat_layer`: ConvNeXt layer (0–3, default 1 → 192-dim features)
 
 ### Evaluation Against Tampering
 ```bash
@@ -36,45 +37,69 @@ CUDA_VISIBLE_DEVICES=0 python eval_AGE.py \
     tamper_mode=ldm
 ```
 
-Configuration in `config.yaml`:
-- `target_model`: ours (LocMark), omniguard, wam, stableguard (baselines)
-- `tamper_mode`: ldm, controlnet, hdpainter, zero_mask, vae_recon
-- `aug_type`/`aug_param`: optional augmentation for robustness testing
+`eval_AGE.py` uses Hydra-style CLI overrides against `config.yaml`. Key config fields:
+- `target_model`: `ours`, `ours_e2e`, `omniguard`, `wam`, `stableguard`, `clean`
+- `tamper_mode`: `ldm`, `controlnet`, `hdpainter`, `zero_mask`, `vae_regen`, `sdxl`, `flux`, `brushnet`
+- `aug_type` / `aug_param`: optional augmentation for robustness testing
+- `weight_paths`: per-model checkpoint directories
+- `use_refiner`: use `ShallowUpDecoder` for LocMark mask refinement (vs. bilinear upsample)
+- `eval_dist`: compute cosine similarity distribution (watermarked/clean/inpainted)
+
+Evaluation scripts for specific setups are in `scripts/` (`eval.sh`, `eval_ablation.sh`, `eval_robustness.sh`).
 
 ## Architecture
 
-### LocMark Core (`locmark/`)
+### LocMark (`locmark/`)
 
-**LocMark** (`locmark.py`): Main watermarking class
-- Uses pretrained ConvNeXt (`convnext_small.dinov3_lvd1689m`) as feature extractor
-- Direction vectors loaded from pre-generated `.pt` files for cosine similarity computation
-- `embed_watermark()`: Optimizes latent perturbation to maximize cosine similarity with direction vectors
-- `decode_watermark()`: Extracts tampering mask via cosine similarity thresholding
-- Loss functions: PSNR loss, LPIPS loss, hard negative mining loss
+**Core method** — no binary message encoding; uses direction vectors and cosine similarity.
 
-**Params** (`main.py`): Configuration class with hyperparameters
-- `feat_layer`: ConvNeXt layer to extract features (0-3, default 1 → 192 dims)
-- `temperature`: Sigmoid scaling for confidence map
-- `eps0_std`: Latent noise range for robustness training
+- `locmark.py` — `LocMark` class:
+  - Feature extractor: `convnext_small.dinov3_lvd1689m` (timm)
+  - `embed_watermark()`: Adam-based latent perturbation optimization. Loss = cosine similarity loss + PSNR loss (`lambda_p`) + LPIPS loss (`lambda_i`) + hard negative mining loss (`lambda_clean`, `lambda_noisy`)
+  - `decode_watermark()`: Returns `(logits, confidence_map, binary_prediction)` via cosine similarity thresholding; optionally refined by `ShallowUpDecoder`
+  - Direction vectors: zero-mean, sign-quantized, L2-normalized random vectors stored as `.pt` files; loaded at init
 
-### Baseline Methods (for comparison)
-- `stableguard/`: MPW-VAE + MoE-GFN (48-bit watermark)
-- `omniguard/`: OmniGuard watermarking (64-bit)
-- `watermark_anything/`: WAM (32-bit)
-- `HD-Painter/`: HD inpainting for tampering simulation
+- `main.py` — `Params` dataclass + `run_locmark()` entry point
+
+- `train_decoder.py` — `ShallowUpDecoder` for mask refinement (loaded when `use_refiner=True`)
+
+**ConvNeXt feature dimensions by layer:**
+| `feat_layer` | Dims |
+|---|---|
+| 0 | 96 |
+| 1 (default) | 192 |
+| 2 | 384 |
+| 3 | 768 |
+
+### LocMark E2E (`locmark_e2e/`)
+
+End-to-end variant built on top of `watermark_anything/`. Uses ImageNet normalization for both embedder and detector (`normalization: imagenet` in config).
+
+### Baseline Methods
+
+- `stableguard/models/mpw_vae.py` — `MultiplexingWatermarkVAEDecoder`: lightweight adapter on a pretrained VAE; `MsgAdapter` encodes 48-bit binary watermark into latent space
+- `stableguard/models/moe_gfn.py` — `MoEGuidedForensicNet`: mixture-of-experts forensic network combining watermark patterns, tampering traces, and frequency-domain cues
+- `omniguard/` — 64-bit watermarking via Vision Transformer + DWT/IWT
+- `watermark_anything/` — 32-bit WAM baseline
+
+**Normalization per model** (used in `eval_AGE.py` for preprocessing):
+- `rescale` ([-1,1]): stableguard, omniguard, ours
+- `imagenet`: wam, ours_e2e
 
 ### Evaluation Framework (`evaluation/`)
-- `PixelF1`, `PixelAUC`, `PixelIOU`, `PixelAccuracy` for tampering localization
-- `augmentation.py`: robustness transforms (blur, noise, compression)
+
+Pixel-level metrics: `PixelF1`, `PixelAUC`, `PixelIOU`, `PixelAccuracy`.
+Augmentation robustness transforms in `augmentation.py` (blur, noise, compression).
 
 ### Datasets (`dataset.py`)
-- `AGEDataset`: AGE-Set for tampering detection evaluation
-- `CocoDataset`: COCO 2017 for training baselines
+
+- `AGEDataset`: AGE-Set for tampering detection evaluation (256×256)
+- `CocoDataset`: COCO 2017 for baseline training
+- `ImageDataset`: generic loader
 
 ## Key Patterns
 
-- Image size: 256×256 for evaluation, 512×512 for VAE encoding
-- Watermark detection: Cosine similarity between image features and direction vectors
-- Tampering localization: Regions with low cosine similarity indicate tampering
-- Direction vectors: Pre-generated universal vectors stored in `.pt` files
-- Perturbation constraint: L1 norm bounded by `epsilon` parameter
+- Eval image size: 256×256; VAE encoding: 512×512
+- Tampering localization: low cosine similarity regions → tampered
+- `eval_AGE.py` drives all method comparisons; `config.yaml` is the single source of truth for paths and per-model settings
+- All path configuration (checkpoint dirs, dataset paths) lives in `config.yaml` `weight_paths` section
