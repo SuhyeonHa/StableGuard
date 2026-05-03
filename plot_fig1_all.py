@@ -32,7 +32,7 @@ image_paths = [
 ]
 
 row_labels = ["WAM", "OmniGuard", "StableGuard", "APT*"]
-col_labels = ["Signal", "FR", "SP", "Mask (FR)", "Mask (SP)"]
+col_labels = ["Signal\n(Emb.)", "Signal\n(FR)", "Signal\n(SP)", "Loc. Mask\n(FR)", "Loc. Mask\n(SP)"]
 
 rows, cols = 4, 5
 fig, axes = plt.subplots(rows, cols, figsize=(15, 10))

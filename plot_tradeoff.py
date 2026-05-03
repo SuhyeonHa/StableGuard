@@ -32,8 +32,8 @@ def plot_performance(ax, x, psnr, sp, fr, title, xlabel, time=None, is_first=Fal
     
     # IoU 축 설정
     ax_iou = ax.twinx()
-    ln2 = ax_iou.plot(x, sp, color='#1f77b4', marker='s', linewidth=2, label='SP (IoU)')
-    ln3 = ax_iou.plot(x, fr, color='#2ca02c', marker='^', linewidth=2, label='FR (IoU)')
+    ln2 = ax_iou.plot(x, sp, color='#1f77b4', marker='s', linewidth=2, label='IoU (SP)')
+    ln3 = ax_iou.plot(x, fr, color='#2ca02c', marker='^', linewidth=2, label='IoU (FR)')
     ax_iou.set_ylim(0.75, 1.0)
     ax_iou.tick_params(axis='y', labelsize=18) # IoU 눈금 크기 조절
     

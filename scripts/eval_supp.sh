@@ -27,13 +27,16 @@
 #     "ours/supp-psnr-anchor-map-2/20260309-053450"
 # )
 
-# target_dirs=(
-#     "ours/hinge-hard-noise-sd1/20260228-193241"
-# )
-
 target_dirs=(
+    # "ours/hinge-hard-noise-sd1/20260228-193241"
     "ours/supp-vit-l5/20260310-110335"
 )
+
+# target_dirs=(
+#     "ours/supp-aug-0.25/20260311-051419"
+#     "ours/supp-aug-0.5/20260311-051616"
+#     "ours/supp-aug-0.1/20260311-070327"
+# )
 
 base_prefix="/mnt/nas5/suhyeon/projects/locmark_table_1"
 
