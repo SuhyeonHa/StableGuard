@@ -557,19 +557,24 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             cache_dir='/mnt/nas5/suhyeon/caches/',
         )
         pipe.enable_model_cpu_offload()
-    elif tamper_mode == 'qwen':
-        controlnet = QwenImageControlNetModel.from_pretrained(
-            "InstantX/Qwen-Image-ControlNet-Inpainting",
-            torch_dtype=torch.bfloat16,
-            cache_dir='/mnt/nas5/suhyeon/caches/',
-        )
-        pipe = QwenImageControlNetInpaintPipeline.from_pretrained(
-            "Qwen/Qwen-Image",
-            controlnet=controlnet,
-            torch_dtype=torch.bfloat16,
-            cache_dir='/mnt/nas5/suhyeon/caches/',
-        )
-        pipe.enable_sequential_cpu_offload()
+    # elif tamper_mode == 'qwen':  # disabled: Qwen-Image-Edit-2509 is 54GB, OOM on 24GB GPU
+    #     _lp_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LanPaint-diffusers")
+    #     if _lp_src not in sys.path:
+    #         sys.path.insert(0, _lp_src)
+    #     from lanpaint_pipeline import create_adapter, LanPaintInpaintPipeline, LanPaintConfig
+    #     _lp_adapter = create_adapter(
+    #         "qwen",
+    #         device="cuda",
+    #         torch_dtype=torch.bfloat16,
+    #         cache_dir='/mnt/nas5/suhyeon/caches/',
+    #     )
+    #     pipe = LanPaintInpaintPipeline(_lp_adapter, config=LanPaintConfig(
+    #         n_steps=2,
+    #         friction=15.0,
+    #         chara_lambda=8.0,
+    #         step_size=0.2,
+    #         blend_overlap=9,
+    #     ))
     elif tamper_mode == 'flux2':
         _lp_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LanPaint-diffusers")
         if _lp_src not in sys.path:
@@ -1316,57 +1321,8 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
                 save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
 
-        elif tamper_mode == 'qwen':
-            image_256 = F.interpolate(cover_images, size=(256, 256), mode="bilinear", align_corners=False).float()
-            mask_256 = F.interpolate(masks, size=(256, 256), mode='nearest').float()
-
-            inpaint_input_np = (image_256 / 2 + 0.5).clamp(0, 1)
-            inpaint_input_np = inpaint_input_np.squeeze(0).cpu().permute(1, 2, 0).numpy()
-            inpaint_input_pil = Image.fromarray((inpaint_input_np * 255).astype(np.uint8)).convert('RGB')
-
-            inpaint_mask_np = mask_256.squeeze(0).squeeze(0).cpu().numpy()
-            inpaint_mask_pil = Image.fromarray((inpaint_mask_np * 255).astype(np.uint8)).convert('L')
-
-            generated_images = pipe(
-                prompt="",
-                negative_prompt=" ",
-                height=256,
-                width=256,
-                control_image=inpaint_input_pil,
-                control_mask=inpaint_mask_pil,
-                num_inference_steps=30,
-                true_cfg_scale=4.0,
-                generator=torch.Generator(device="cuda").manual_seed(seed + i),
-            ).images[0]
-
-            generated_images = ToTensor()(generated_images).cuda().float()
-            generated_images = (generated_images * 2.0 - 1.0).unsqueeze(0)
-
-            spliced_images = mask_256 * generated_images + (1 - mask_256) * image_256
-            spliceless_images = generated_images
-
-            spliced_images = F.interpolate(spliced_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
-            spliceless_images = F.interpolate(spliceless_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
-            cover_images = F.interpolate(cover_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
-
-            for i in range(images.size(0)):
-                save_file_name = image_names[i]
-                spliced_image = spliced_images[i].unsqueeze(0)
-                spliceless_image = spliceless_images[i].unsqueeze(0)
-                mask = masks[i].unsqueeze(0)
-
-                spliced_image = (spliced_image / 2 + 0.5).clamp(0, 1)
-                spliced_image = spliced_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
-                spliced_image_pil = Image.fromarray((spliced_image * 255).astype(np.uint8))
-
-                spliceless_image = (spliceless_image / 2 + 0.5).clamp(0, 1)
-                spliceless_image = spliceless_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
-                spliceless_image_pil = Image.fromarray((spliceless_image * 255).astype(np.uint8))
-
-                spliced_image_pil.save(os.path.join(save_path, 'qwen_spliced_images', save_file_name.replace("jpg", "png")))
-                spliceless_image_pil.save(os.path.join(save_path, 'qwen_spliceless_images', save_file_name.replace("jpg", "png")))
-
-                save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+        # elif tamper_mode == 'qwen':  # disabled: Qwen-Image-Edit-2509 is 54GB, OOM on 24GB GPU
+        #     ...
 
         elif tamper_mode == 'brushnet':
             image_512 = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False).float()
