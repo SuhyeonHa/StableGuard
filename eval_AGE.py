@@ -497,6 +497,8 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         res = ['qwen_spliced_images', 'qwen_spliceless_images']
     elif tamper_mode == 'flux2':
         res = ['flux2_spliced_images', 'flux2_spliceless_images']
+    elif tamper_mode == 'z_image':
+        res = ['z_image_spliced_images', 'z_image_spliceless_images']
     elif tamper_mode == 'brushnet':
         res = ['brushnet_spliced_images', 'brushnet_spliceless_images']
     if target_model == 'clean':
@@ -577,6 +579,24 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             "flux-klein",
             device="cuda",
             model_id="black-forest-labs/FLUX.2-klein-4B",
+            torch_dtype=torch.bfloat16,
+            cache_dir='/mnt/nas5/suhyeon/caches/',
+        )
+        pipe = LanPaintInpaintPipeline(_lp_adapter, config=LanPaintConfig(
+            n_steps=2,
+            friction=15.0,
+            chara_lambda=8.0,
+            step_size=0.2,
+            blend_overlap=9,
+        ))
+    elif tamper_mode == 'z_image':
+        _lp_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LanPaint-diffusers")
+        if _lp_src not in sys.path:
+            sys.path.insert(0, _lp_src)
+        from lanpaint_pipeline import create_adapter, LanPaintInpaintPipeline, LanPaintConfig
+        _lp_adapter = create_adapter(
+            "z-image",
+            device="cuda",
             torch_dtype=torch.bfloat16,
             cache_dir='/mnt/nas5/suhyeon/caches/',
         )
@@ -1191,6 +1211,58 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
                 save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
 
+        elif tamper_mode == 'z_image':
+            image_512 = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False).float()
+            mask_512 = F.interpolate(masks, size=(512, 512), mode='nearest').float()
+
+            inpaint_input_np = (image_512 / 2 + 0.5).clamp(0, 1)
+            inpaint_input_np = inpaint_input_np.squeeze(0).cpu().permute(1, 2, 0).numpy()
+            inpaint_input_pil = Image.fromarray((inpaint_input_np * 255).astype(np.uint8)).convert('RGB')
+
+            # LanPaint convention: white=KEEP, black=EDIT → invert (our mask=1 means edit)
+            inpaint_mask_np = (1 - mask_512).squeeze(0).squeeze(0).cpu().numpy()
+            inpaint_mask_pil = Image.fromarray((inpaint_mask_np * 255).astype(np.uint8)).convert('L')
+
+            generated_images = pipe(
+                prompt="a realistic photo",
+                image=inpaint_input_pil,
+                mask_image=inpaint_mask_pil,
+                height=512,
+                width=512,
+                guidance_scale=5.0,
+                num_inference_steps=20,
+                seed=seed + i,
+            ).images[0]
+
+            generated_images = ToTensor()(generated_images).cuda().float()
+            generated_images = (generated_images * 2.0 - 1.0).unsqueeze(0)
+
+            spliced_images = mask_512 * generated_images + (1 - mask_512) * image_512
+            spliceless_images = generated_images
+
+            spliced_images = F.interpolate(spliced_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+            spliceless_images = F.interpolate(spliceless_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+            cover_images = F.interpolate(cover_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+
+            for i in range(images.size(0)):
+                save_file_name = image_names[i]
+                spliced_image = spliced_images[i].unsqueeze(0)
+                spliceless_image = spliceless_images[i].unsqueeze(0)
+                mask = masks[i].unsqueeze(0)
+
+                spliced_image = (spliced_image / 2 + 0.5).clamp(0, 1)
+                spliced_image = spliced_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                spliced_image_pil = Image.fromarray((spliced_image * 255).astype(np.uint8))
+
+                spliceless_image = (spliceless_image / 2 + 0.5).clamp(0, 1)
+                spliceless_image = spliceless_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                spliceless_image_pil = Image.fromarray((spliceless_image * 255).astype(np.uint8))
+
+                spliced_image_pil.save(os.path.join(save_path, 'z_image_spliced_images', save_file_name.replace("jpg", "png")))
+                spliceless_image_pil.save(os.path.join(save_path, 'z_image_spliceless_images', save_file_name.replace("jpg", "png")))
+
+                save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+
         elif tamper_mode == 'sdv3':
             image_512 = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False).float()
             mask_512 = F.interpolate(masks, size=(512, 512), mode='nearest').float()
@@ -1725,6 +1797,8 @@ if __name__ == "__main__":
         eval_setting = ["flux_spliced", "flux_spliceless"]
     elif c['tamper_mode'] == 'flux2':
         eval_setting = ["flux2_spliced", "flux2_spliceless"]
+    elif c['tamper_mode'] == 'z_image':
+        eval_setting = ["z_image_spliced", "z_image_spliceless"]
     elif c['tamper_mode'] == 'sdv3':
         eval_setting = ["sdv3_spliced", "sdv3_spliceless"]
     elif c['tamper_mode'] == 'qwen':
