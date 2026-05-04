@@ -541,7 +541,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             torch_dtype=torch.bfloat16,
             cache_dir='/mnt/nas5/suhyeon/caches/',
         )
-        pipe.enable_sequential_cpu_offload()
+        pipe.enable_model_cpu_offload()
     elif tamper_mode == 'sdv3':
         controlnet = SD3ControlNetModel.from_pretrained(
             "alimama-creative/SD3-Controlnet-Inpainting",
