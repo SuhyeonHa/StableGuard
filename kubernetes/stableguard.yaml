@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-eval-zimage-ours
+  name: suhyeon-eval-flux2-ours
 spec:
   template:
     spec:

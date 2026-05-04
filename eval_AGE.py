@@ -1177,7 +1177,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                 mask_image=inpaint_mask_pil,
                 height=512,
                 width=512,
-                guidance_scale=10.0,
+                guidance_scale=5.0,
                 num_inference_steps=4,
                 seed=seed + i,
             ).images[0]
