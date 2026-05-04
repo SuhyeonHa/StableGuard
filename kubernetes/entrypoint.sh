@@ -26,6 +26,7 @@ echo "Clone complete."
 pip install -U bitsandbytes
 pip install git+https://github.com/huggingface/diffusers.git
 pip install git+https://github.com/huggingface/transformers.git
+pip install git+https://github.com/scraed/LanPaint.git
 
 # python eval_AGE.py
 # python -m locmark.main

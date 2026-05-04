@@ -16,7 +16,7 @@ from diffusers import AutoencoderKL, StableDiffusionInpaintPipeline, AutoPipelin
 from diffusers.pipelines import StableDiffusion3ControlNetInpaintingPipeline
 from diffusers import SD3ControlNetModel
 from diffusers import QwenImageControlNetModel, QwenImageControlNetInpaintPipeline
-from diffusers import Flux2KleinInpaintPipeline  # requires diffusers dev (0.38.0+)
+# LanPaint-diffusers path added in flux2 model init block
 import torch
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
@@ -569,12 +569,24 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
         )
         pipe.enable_sequential_cpu_offload()
     elif tamper_mode == 'flux2':
-        pipe = Flux2KleinInpaintPipeline.from_pretrained(
-            "black-forest-labs/FLUX.2-klein-4B",
+        _lp_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LanPaint-diffusers")
+        if _lp_src not in sys.path:
+            sys.path.insert(0, _lp_src)
+        from lanpaint_pipeline import create_adapter, LanPaintInpaintPipeline, LanPaintConfig
+        _lp_adapter = create_adapter(
+            "flux-klein",
+            device="cuda",
+            model_id="black-forest-labs/FLUX.2-klein-4B",
             torch_dtype=torch.bfloat16,
             cache_dir='/mnt/nas5/suhyeon/caches/',
         )
-        pipe.enable_model_cpu_offload()
+        pipe = LanPaintInpaintPipeline(_lp_adapter, config=LanPaintConfig(
+            n_steps=2,
+            friction=15.0,
+            chara_lambda=8.0,
+            step_size=0.2,
+            blend_overlap=9,
+        ))
     elif tamper_mode == 'brushnet':
         _bn_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "BrushNet", "src")
         # BrushNet requires its own modified diffusers (UNet with down_block_add_samples).
@@ -1135,19 +1147,19 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             inpaint_input_np = inpaint_input_np.squeeze(0).cpu().permute(1, 2, 0).numpy()
             inpaint_input_pil = Image.fromarray((inpaint_input_np * 255).astype(np.uint8)).convert('RGB')
 
-            inpaint_mask_np = mask_512.squeeze(0).squeeze(0).cpu().numpy()
+            # LanPaint convention: white=KEEP, black=EDIT → invert (our mask=1 means edit)
+            inpaint_mask_np = (1 - mask_512).squeeze(0).squeeze(0).cpu().numpy()
             inpaint_mask_pil = Image.fromarray((inpaint_mask_np * 255).astype(np.uint8)).convert('L')
 
             generated_images = pipe(
-                prompt="A dog",
+                prompt="a realistic photo",
                 image=inpaint_input_pil,
                 mask_image=inpaint_mask_pil,
                 height=512,
                 width=512,
-                strength=1.0,
-                guidance_scale=1.0,
+                guidance_scale=10.0,
                 num_inference_steps=4,
-                generator=torch.Generator("cpu").manual_seed(seed + i)
+                seed=seed + i,
             ).images[0]
 
             generated_images = ToTensor()(generated_images).cuda().float()
