@@ -83,7 +83,7 @@ class Params:
 
         # --- Anchor Vector Design (ablation) ---
         # "rademacher" (default) | "gaussian" | "zeromean" | "quantized"
-        self.anchor_type = "gaussian"
+        self.anchor_type = "zeromean"
 
         # --- Robustness Parameters ---
         self.eps0_std = [0.0, 0.25] # Latent noise sigma range
