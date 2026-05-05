@@ -66,6 +66,7 @@ class LocMark:
             anchor_path = f'/mnt/nas5/suhyeon/projects/apt_rebuttal/ours/anchor_vectors/ablation_{anchor_type}_192.pt'
         else:
             anchor_path = f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt'
+        print(f"Loading anchor vectors from: {anchor_path}")
         self.direction_vectors = torch.load(anchor_path).to(self.args.device)
         # self.direction_vectors = self.generate_universal_vectors(self.args.feature_dim)
         # torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_ones_{self.args.feature_dim}.pt')
