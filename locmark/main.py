@@ -40,7 +40,7 @@ class Params:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0049.png'
-        self.exp_name = 'zeromean'
+        self.exp_name = 'quantized'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark_table_1/ours' # NOTE: multi image optimization, exp_name
         self.output_dir = f'/mnt/nas5/suhyeon/projects/apt_rebuttal/ours_ablation' # NOTE: multi image optimization, exp_name
@@ -83,7 +83,7 @@ class Params:
 
         # --- Anchor Vector Design (ablation) ---
         # "rademacher" (default) | "gaussian" | "zeromean" | "quantized"
-        self.anchor_type = "zeromean"
+        self.anchor_type = "quantized"
 
         # --- Robustness Parameters ---
         self.eps0_std = [0.0, 0.25] # Latent noise sigma range
