@@ -31,8 +31,8 @@ ANCHOR_DIR = '/mnt/nas5/suhyeon/projects/apt_rebuttal/ours/anchor_vectors'
 def generate(feature_dim, anchor_type, seed):
     torch.manual_seed(seed)
     vecs = torch.randn(1, feature_dim)
-    if anchor_type == 'pca':
-        # In PCA-whitened space all directions are equivalent; use plain Gaussian
+    if anchor_type in ('pca', 'centering'):
+        # isotropic/centered space — plain Gaussian is sufficient
         vecs = vecs / torch.norm(vecs, p=2, dim=1, keepdim=True)
         return vecs
     if anchor_type in ('zeromean', 'rademacher'):
@@ -56,7 +56,7 @@ def find_negative_mean_seed(feature_dim, max_trials=200):
     raise RuntimeError(f'No seed with negative Rademacher mean found in {max_trials} trials')
 
 
-ALL_TYPES = ('gaussian', 'zeromean', 'quantized', 'rademacher', 'pca')
+ALL_TYPES = ('gaussian', 'zeromean', 'quantized', 'rademacher', 'pca', 'centering')
 
 
 def main():

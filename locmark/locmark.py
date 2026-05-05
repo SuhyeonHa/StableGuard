@@ -62,7 +62,7 @@ class LocMark:
         # self.direction_vectors = torch.load('/mnt/nas5/suhyeon/projects/freq-loc/random_vec.pt').to(self.args.device)
         # self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/random_vec_univ_{self.args.feature_dim}.pt').to(self.args.device)
         anchor_type = getattr(self.args, 'anchor_type', None)
-        if anchor_type in ('gaussian', 'quantized', 'zeromean', 'rademacher', 'pca'):
+        if anchor_type in ('gaussian', 'quantized', 'zeromean', 'rademacher', 'pca', 'centering'):
             anchor_path = f'/mnt/nas5/suhyeon/projects/apt_rebuttal/ours/anchor_vectors/ablation_{anchor_type}_{self.args.feature_dim}.pt'
         else:
             anchor_path = f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt'
@@ -75,13 +75,18 @@ class LocMark:
         self.pca_mean = None
         self.pca_components = None
         self.pca_std = None
-        if anchor_type == 'pca':
+        self.feature_mean = None
+        if anchor_type in ('pca', 'centering'):
             pca_path = f'/mnt/nas5/suhyeon/projects/apt_rebuttal/ours/anchor_vectors/pca_stats_{self.args.feature_dim}.pt'
             pca = torch.load(pca_path, map_location=self.args.device, weights_only=True)
-            self.pca_mean = pca['mean'].to(self.args.device)
-            self.pca_components = pca['components'].to(self.args.device)
-            self.pca_std = pca['explained_std'].to(self.args.device)
-            print(f"PCA whitening stats loaded from: {pca_path}")
+            if anchor_type == 'pca':
+                self.pca_mean = pca['mean'].to(self.args.device)
+                self.pca_components = pca['components'].to(self.args.device)
+                self.pca_std = pca['explained_std'].to(self.args.device)
+                print(f"PCA whitening stats loaded from: {pca_path}")
+            else:
+                self.feature_mean = pca['mean'].to(self.args.device)
+                print(f"Feature mean loaded from: {pca_path}")
 
         self.loss_fn_vgg = lpips.LPIPS(net='alex').to(self.args.device)
         self.loss_fn_vgg.eval()
@@ -104,6 +109,10 @@ class LocMark:
         f = f @ self.pca_components.T
         f = f / (self.pca_std + 1e-8)
         return f
+
+    def center(self, features: torch.Tensor) -> torch.Tensor:
+        """Subtract feature mean (DC bias removal only). Input: (B, N, d)"""
+        return features - self.feature_mean
 
     def _create_random_mask(self, img_pt, num_masks=1, mask_percentage=0.1, max_attempts=100):
         _, _, height, width = img_pt.shape
@@ -238,6 +247,8 @@ class LocMark:
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             if self.pca_mean is not None:
                 features = self.whiten(features)
+            elif self.feature_mean is not None:
+                features = self.center(features)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
             base_cos_sim = torch.matmul(features_norm, self.direction_vectors.T)
 
@@ -253,6 +264,8 @@ class LocMark:
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             if self.pca_mean is not None:
                 features = self.whiten(features)
+            elif self.feature_mean is not None:
+                features = self.center(features)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
             cos_sim = torch.matmul(features_norm, self.direction_vectors.T)
             if step == 0 or (step+1) % 100 == 0:
@@ -266,6 +279,8 @@ class LocMark:
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
             if self.pca_mean is not None:
                 features = self.whiten(features)
+            elif self.feature_mean is not None:
+                features = self.center(features)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
             cos_sim_1 = torch.matmul(features_norm, self.direction_vectors.T)
             if step == 0 or (step+1) % 100 == 0:
@@ -335,6 +350,8 @@ class LocMark:
             epsilon = 1e-6
             if self.pca_mean is not None:
                 features = self.whiten(features)
+            elif self.feature_mean is not None:
+                features = self.center(features)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
             dot_products = torch.matmul(features_norm, self.direction_vectors.T)
 

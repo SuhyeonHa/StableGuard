@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-abalation-pca
+  name: suhyeon-abalation-centering
 spec:
   template:
     spec:
