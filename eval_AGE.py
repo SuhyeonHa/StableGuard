@@ -1387,7 +1387,7 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
 
 
 @torch.no_grad()
-def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num_bits=48, model_size=512, end_idx=None, aug_type=None, aug_param=None, wm_strength=None, use_refiner=True, save_aug_image=False):
+def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num_bits=48, model_size=512, end_idx=None, aug_type=None, aug_param=None, wm_strength=None, use_refiner=True, save_aug_image=False, anchor_type='rademacher'):
     if aug_type is not None and aug_param is not None:
         exp_suffix = f"{eval_setting}_{aug_type}_{aug_param}"
     else:
@@ -1426,6 +1426,7 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
         extractor = extractor.cuda().eval()
     elif target_model == "ours":
         args = Params()
+        args.anchor_type = anchor_type
         locmark = LocMark(args=args)
 
     # bit_acc = []
@@ -1579,23 +1580,29 @@ def generate_tamper_mask(weight_path, eval_setting, target_model, save_path, num
             # torch.save(logits.cpu(), os.path.join(save_path, f"cossim_{exp_suffix}", pt_filename))
 
 @torch.no_grad()
-def eval_cossim_distribution(target_model, save_path, src_image_path, edit_model_name, model_size=256, end_idx=None, seed=42):
+def eval_cossim_distribution(target_model, save_path, src_image_path, edit_model_name, model_size=256, end_idx=None, seed=42, anchor_type='rademacher'):
     """
     For 'ours' model only: compute and save cosine similarity distribution statistics.
 
     For each watermarked image in save_path/cover_images:
-      1. wm_cossim       - average cossim over the whole watermarked image
-      2. clean_cossim    - average cossim over the whole clean image
+      1. wm_cossim          - average cossim over the whole watermarked image
+      2. clean_cossim       - average cossim over the whole clean image
       3. inp_inside_cossim  - average cossim inside center mask after inpainting
       4. inp_outside_cossim - average cossim outside center mask after inpainting
+      5. bg_complexity      - Laplacian variance of BG (outside-mask) region
 
     Center mask: model_size//2 × model_size//2 square (1/4 area), centered.
 
-    Results saved to <save_path>/dist_results.json and appended to <save_path>/record.txt.
+    Saved per image:
+      dist_results.json          - per-image stats + summary averages
+      dist_inpainted/{img}       - inpainted image PNG (visual inspection)
+      dist_grids/{img}.pt        - {'inp_grid', 'wm_grid'} cos_sim grid tensors
+      dist_tensors/{img}.pt      - {'wm', 'clean', 'inpainted'} image tensors [1,3,H,W]
     """
     assert target_model == 'ours', "eval_dist is only supported for 'ours' model"
 
     args = Params()
+    args.anchor_type = anchor_type
     locmark = LocMark(args=args)
 
     pipe = StableDiffusionInpaintPipeline.from_pretrained(
@@ -1616,6 +1623,14 @@ def eval_cossim_distribution(target_model, save_path, src_image_path, edit_model
     x0 = model_size // 4
     center_mask = torch.zeros(1, 1, model_size, model_size).cuda()
     center_mask[0, 0, y0:y0 + mask_side, x0:x0 + mask_side] = 1.0
+    bg_mask_np = (1 - center_mask[0, 0]).cpu().numpy()  # (H, W), 1=BG
+
+    # Output directories
+    dir_inpainted = os.path.join(save_path, 'dist_inpainted')
+    dir_grids     = os.path.join(save_path, 'dist_grids')
+    dir_tensors   = os.path.join(save_path, 'dist_tensors')
+    for d in (dir_inpainted, dir_grids, dir_tensors):
+        os.makedirs(d, exist_ok=True)
 
     per_image = {}
 
@@ -1663,12 +1678,35 @@ def eval_cossim_distribution(target_model, save_path, src_image_path, edit_model
         inside_cossim  = inp_grid[feat_mask > 0.5].mean().item()
         outside_cossim = inp_grid[feat_mask <= 0.5].mean().item()
 
+        # BG complexity: Laplacian variance over outside-mask region
+        wm_np   = (wm_tensor[0].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+        wm_gray = cv2.cvtColor(wm_np, cv2.COLOR_RGB2GRAY)
+        laplacian = cv2.Laplacian(wm_gray, cv2.CV_64F)
+        bg_complexity = float((laplacian ** 2 * bg_mask_np).sum() / bg_mask_np.sum())
+
         per_image[img_name] = {
             'wm_cossim':          wm_cossim,
             'clean_cossim':       clean_cossim,
             'inp_inside_cossim':  inside_cossim,
             'inp_outside_cossim': outside_cossim,
+            'bg_complexity':      bg_complexity,
         }
+
+        # Save inpainted PNG
+        save_image(inpainted.cpu(), os.path.join(dir_inpainted, img_name))
+
+        # Save cos_sim grids
+        stem = os.path.splitext(img_name)[0]
+        torch.save(
+            {'inp_grid': inp_grid.cpu(), 'wm_grid': wm_grid.cpu()},
+            os.path.join(dir_grids, stem + '.pt')
+        )
+
+        # Save image tensors
+        torch.save(
+            {'wm': wm_tensor.cpu(), 'clean': clean_tensor.cpu(), 'inpainted': inpainted.cpu()},
+            os.path.join(dir_tensors, stem + '.pt')
+        )
 
     # aggregate
     wm_avg      = float(np.mean([v['wm_cossim']          for v in per_image.values()]))
@@ -1807,13 +1845,14 @@ if __name__ == "__main__":
                             aug_param=c['aug_param'],
                             wm_strength=c['wm_strength'],
                             use_refiner=c['use_refiner'],
-                            save_aug_image=c.get('save_aug_image', False))
+                            save_aug_image=c.get('save_aug_image', False),
+                            anchor_type=c.get('anchor_type', 'rademacher'))
         # 3) Evaluate predicted masks against ground-truth masks saved in disk
         pred_mask_dir = f"{c['save_path']}/pred_mask_{setting}{aug_suffix}{refiner_tag}"
         eva = Evaluation(pred_mask_dir, f"{c['save_path']}/gt", eval_size=c['eval_size'], end_idx=c['end_idx'])
         eva.run(pred_mask_dir, tamper_mode=c['tamper_mode'])
 
-    # 4) Evaluate fidelity between watermarked and original images
+    # # 4) Evaluate fidelity between watermarked and original images
     # eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'], end_idx=c['end_idx'])
     # eva_fid.run(f"{c['save_path']}/cover_images")
 

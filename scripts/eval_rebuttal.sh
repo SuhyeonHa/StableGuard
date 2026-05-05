@@ -2,12 +2,12 @@
 # Rebuttal evaluation: all target models vs. flux2 tamper mode
 
 NUM_IMG=100
-TAMPER_MODE=z_image
+TAMPER_MODE=ldm
 DATASET=/mnt/nas5/suhyeon/datasets/valAGE-Set
 SAVE_BASE=/mnt/nas5/suhyeon/projects/apt_rebuttal
 
 # ours (LocMark, with refiner)
-CUDA_VISIBLE_DEVICES=0 python eval_AGE.py \
+CUDA_VISIBLE_DEVICES=1 python eval_AGE.py \
     target_model=ours \
     src_image_path=$DATASET \
     save_path=$SAVE_BASE/ours \
@@ -15,7 +15,9 @@ CUDA_VISIBLE_DEVICES=0 python eval_AGE.py \
     start_idx=0 \
     end_idx=$NUM_IMG \
     tamper_mode=$TAMPER_MODE \
-    use_refiner=True
+    use_refiner=True \
+    eval_dist=True \
+    anchor_type=rademacher
 
 # # ours_e2e (LocMark end-to-end)
 # CUDA_VISIBLE_DEVICES=0 python eval_AGE.py \
