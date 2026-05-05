@@ -62,8 +62,8 @@ class LocMark:
         # self.direction_vectors = torch.load('/mnt/nas5/suhyeon/projects/freq-loc/random_vec.pt').to(self.args.device)
         # self.direction_vectors = torch.load(f'/mnt/nas5/suhyeon/projects/freq-loc/random_vec_univ_{self.args.feature_dim}.pt').to(self.args.device)
         anchor_type = getattr(self.args, 'anchor_type', None)
-        if anchor_type in ('gaussian', 'quantized', 'zeromean'):
-            anchor_path = f'/mnt/nas5/suhyeon/projects/apt_rebuttal/ours/anchor_vectors/ablation_{anchor_type}_192.pt'
+        if anchor_type in ('gaussian', 'quantized', 'zeromean', 'rademacher', 'pca'):
+            anchor_path = f'/mnt/nas5/suhyeon/projects/apt_rebuttal/ours/anchor_vectors/ablation_{anchor_type}_{self.args.feature_dim}.pt'
         else:
             anchor_path = f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_full_{self.args.feature_dim}.pt'
         print(f"Loading anchor vectors from: {anchor_path}")
@@ -71,6 +71,17 @@ class LocMark:
         # self.direction_vectors = self.generate_universal_vectors(self.args.feature_dim)
         # torch.save(self.direction_vectors, f'/mnt/nas5/suhyeon/projects/freq-loc/ablation_ones_{self.args.feature_dim}.pt')
         self.num_patches = (self.args.image_size // 14) ** 2
+
+        self.pca_mean = None
+        self.pca_components = None
+        self.pca_std = None
+        if anchor_type == 'pca':
+            pca_path = f'/mnt/nas5/suhyeon/projects/apt_rebuttal/ours/anchor_vectors/pca_stats_{self.args.feature_dim}.pt'
+            pca = torch.load(pca_path, map_location=self.args.device, weights_only=True)
+            self.pca_mean = pca['mean'].to(self.args.device)
+            self.pca_components = pca['components'].to(self.args.device)
+            self.pca_std = pca['explained_std'].to(self.args.device)
+            print(f"PCA whitening stats loaded from: {pca_path}")
 
         self.loss_fn_vgg = lpips.LPIPS(net='alex').to(self.args.device)
         self.loss_fn_vgg.eval()
@@ -86,6 +97,13 @@ class LocMark:
             vecs = torch.sign(vecs + 1e-6)
         vecs = vecs / torch.norm(vecs, p=2, dim=1, keepdim=True)
         return vecs.to(self.args.device)
+
+    def whiten(self, features: torch.Tensor) -> torch.Tensor:
+        """PCA whitening: center → project onto eigenvectors → scale. Input: (B, N, d)"""
+        f = features - self.pca_mean
+        f = f @ self.pca_components.T
+        f = f / (self.pca_std + 1e-8)
+        return f
 
     def _create_random_mask(self, img_pt, num_masks=1, mask_percentage=0.1, max_attempts=100):
         _, _, height, width = img_pt.shape
@@ -218,6 +236,8 @@ class LocMark:
             # features = self.feature_upsampler(image, features, q_chunk_size=3)
             B, C, H, W = features.shape # [1, 192, 32, 32]
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
+            if self.pca_mean is not None:
+                features = self.whiten(features)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
             base_cos_sim = torch.matmul(features_norm, self.direction_vectors.T)
 
@@ -231,6 +251,8 @@ class LocMark:
             # features = self.feature_upsampler(watermarked_image, features, q_chunk_size=3)
             B, C, H, W = features.shape
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
+            if self.pca_mean is not None:
+                features = self.whiten(features)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
             cos_sim = torch.matmul(features_norm, self.direction_vectors.T)
             if step == 0 or (step+1) % 100 == 0:
@@ -242,6 +264,8 @@ class LocMark:
 
             features = self.image_encoder(watermarked_image_1)[self.args.feat_layer]
             features = features.permute(0, 2, 3, 1).view(B, H * W, C)
+            if self.pca_mean is not None:
+                features = self.whiten(features)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
             cos_sim_1 = torch.matmul(features_norm, self.direction_vectors.T)
             if step == 0 or (step+1) % 100 == 0:
@@ -309,6 +333,8 @@ class LocMark:
             # dot_products = torch.matmul(features, self.direction_vectors.T) # [1, 256, 384]*[1, 384, 256] -> [1, 256, 1]
 
             epsilon = 1e-6
+            if self.pca_mean is not None:
+                features = self.whiten(features)
             features_norm = features / (torch.norm(features, p=2, dim=-1, keepdim=True) + epsilon)
             dot_products = torch.matmul(features_norm, self.direction_vectors.T)
 
