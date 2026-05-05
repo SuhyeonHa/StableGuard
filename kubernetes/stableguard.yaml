@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-abalation-zeromean
+  name: suhyeon-abalation-gaussian
 spec:
   template:
     spec:
