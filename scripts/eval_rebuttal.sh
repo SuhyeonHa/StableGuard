@@ -2,7 +2,7 @@
 # Rebuttal evaluation: all target models vs. flux2 tamper mode
 
 NUM_IMG=100
-TAMPER_MODE=flux
+TAMPER_MODE=z_image
 DATASET=/mnt/nas5/suhyeon/datasets/valAGE-Set
 SAVE_BASE=/mnt/nas5/suhyeon/projects/apt_rebuttal
 

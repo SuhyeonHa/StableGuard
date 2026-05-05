@@ -40,11 +40,12 @@ class Params:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0049.png'
-        self.exp_name = 'hinge-hard-noise-500-0049'
+        self.exp_name = 'gaussian'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
-        self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark_table_1/ours' # NOTE: multi image optimization, exp_name
+        # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark_table_1/ours' # NOTE: multi image optimization, exp_name
+        self.output_dir = f'/mnt/nas5/suhyeon/projects/apt_rebuttal/ours_ablation' # NOTE: multi image optimization, exp_name
         # self.output_dir = "/mnt/nas5/suhyeon/projects/locmark/" # single image optimization
-        self.single_image_mode = True # NOTE
+        self.single_image_mode = False # NOTE
         self.num_test_images = 100 # the first n images
 
         # --- Model Configurations ---
@@ -79,6 +80,10 @@ class Params:
         self.lambda_noisy = 1.0
         self.feat_layer = 1
         self.epsilon = 16/255
+
+        # --- Anchor Vector Design (ablation) ---
+        # "rademacher" (default) | "gaussian" | "zeromean" | "quantized"
+        self.anchor_type = "gaussian"
 
         # --- Robustness Parameters ---
         self.eps0_std = [0.0, 0.25] # Latent noise sigma range
@@ -159,7 +164,6 @@ def run_locmark(args=None, save_dir=None):
         os.makedirs(os.path.join(save_dir, "watermark"), exist_ok=True)
         os.makedirs(os.path.join(save_dir, "prediction"), exist_ok=True)
         os.makedirs(os.path.join(save_dir, "bin_prediction"), exist_ok=True)
-        os.makedirs(os.path.join(save_dir, "cossim"), exist_ok=True)
         
         for i in range(args.num_test_images):
             set_seed(args.seed + i)
@@ -184,8 +188,6 @@ def run_locmark(args=None, save_dir=None):
             torchvision.utils.save_image(watermark.cpu()*5, os.path.join(save_dir, "watermark", filename))
             torchvision.utils.save_image(prediction.cpu(), os.path.join(save_dir, "prediction", filename))
             torchvision.utils.save_image(bin_prediction.cpu(), os.path.join(save_dir, "bin_prediction", filename))
-            torchvision.utils.save_image(logits.cpu(), os.path.join(save_dir, "cossim", filename))
-
             psnr = locmark._compute_psnr(original, watermarked)
             results[filename] = psnr
 
