@@ -312,8 +312,9 @@ class LocMark:
             
             loss_m = torch.mean(F.relu(target_cosine - cos_sim))
             loss_m1 = torch.mean(F.relu(target_cosine - cos_sim_1))
-            loss_h = self._hard_negative_mining_loss(cos_sim, target_cosine, k_percent=0.1)
-            loss_h1 = self._hard_negative_mining_loss(cos_sim_1, target_cosine, k_percent=0.1)
+            hnm_k_percent = getattr(self.args, 'hnm_k_percent', 0.10)
+            loss_h = self._hard_negative_mining_loss(cos_sim, target_cosine, k_percent=hnm_k_percent)
+            loss_h1 = self._hard_negative_mining_loss(cos_sim_1, target_cosine, k_percent=hnm_k_percent)
 
             watermarked_image_1 = denorm_imagenet(watermarked_image_1)
             image = denorm_imagenet(image)
