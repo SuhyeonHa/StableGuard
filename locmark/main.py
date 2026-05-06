@@ -40,7 +40,7 @@ class Params:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_datasets = '/mnt/nas5/suhyeon/datasets/valAGE-Set'
         self.image_path = '/mnt/nas5/suhyeon/datasets/valAGE-Set/0049.png'
-        self.exp_name = 'noise-weak'
+        self.exp_name = 'noise-strong'
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark/{self.exp_name}' # single image optimization
         # self.output_dir = f'/mnt/nas5/suhyeon/projects/locmark_table_1/ours' # NOTE: multi image optimization, exp_name
         self.output_dir = f'/mnt/nas5/suhyeon/projects/apt_rebuttal/ours_ablation' # NOTE: multi image optimization, exp_name
@@ -92,7 +92,7 @@ class Params:
         self.anchor_type = "submitted"
 
         # --- Robustness Parameters ---
-        self.eps0_std = [0.0, 0.10] # Latent noise sigma range
+        self.eps0_std = [0.0, 0.50] # Latent noise sigma range
         self.aug_noise_std = [0.0, 0.025] # Image-space Gaussian noise sigma range in [0,1]
         
         # --- Demo/Evaluation Parameters ---
