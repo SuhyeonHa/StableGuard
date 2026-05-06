@@ -8,7 +8,7 @@ spec:
       runtimeClassName: nvidia
       # Uncomment this node Selector if you want to use a specific GPU type
       nodeSelector:
-        nvidia.com/gpu.product: NVIDIA-GeForce-TITAN-RTX
+        nvidia.com/gpu.product: NVIDIA-TITAN-RTX
       
       # Uncomment below if you want to use a specific node
       nodeName: sgvr-gpu-004
