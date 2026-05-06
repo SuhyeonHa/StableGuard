@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-abalation-focal
+  name: suhyeon-abalation-vae
 spec:
   template:
     spec:

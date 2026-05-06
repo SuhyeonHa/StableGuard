@@ -227,8 +227,7 @@ class LocMark:
             elif noisy_type == 'vae_roundtrip':
                 wm_decoded = self.pipe.vae.decode(perturbed_latent).sample
                 re_encoded = self.pipe.vae.encode(wm_decoded).latent_dist.mean
-                perturbed_latent_1 = re_encoded * latent_mask + perturbed_latent * (1 - latent_mask)
-                watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
+                watermarked_image_1 = self.pipe.vae.decode(re_encoded).sample
             elif noisy_type == 'latent_full':
                 eps0 = torch.randn_like(perturbed_latent) * std_val_0
                 perturbed_latent_1 = perturbed_latent + eps0
