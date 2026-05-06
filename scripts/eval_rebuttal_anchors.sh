@@ -5,9 +5,12 @@ DATASET=/mnt/nas5/suhyeon/datasets/valAGE-Set
 SAVE_BASE=/mnt/nas5/suhyeon/projects/apt_rebuttal
 
 target_dirs=(
-    "ours_ablation/gaussian/20260505-054559"
-    "ours_ablation/quantized/20260505-055932"
-    "ours_ablation/zeromean/20260505-055556"
+    # "ours_ablation/gaussian/20260505-134927"
+    "ours_ablation/quantized/20260505-134555"
+    "ours_ablation/zeromean/20260505-134809"
+    "ours_ablation/rademacher/20260505-135204"
+    # "ours_ablation/pca/20260505-150424"
+    "ours_ablation/centering/20260505-155259"
 )
 
 for dir in "${target_dirs[@]}"; do

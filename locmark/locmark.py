@@ -217,12 +217,27 @@ class LocMark:
             # Patch noise injection
             latent_mask = F.interpolate(original_mask, size=(64, 64), mode="bilinear", align_corners=False)
 
+            noisy_type = getattr(self.args, 'noisy_type', 'latent_masked')
             std_val_0 = random.uniform(self.args.eps0_std[0], self.args.eps0_std[1])
-            eps0 = torch.randn_like(perturbed_latent) * std_val_0
 
-            perturbed_latent_1 = (perturbed_latent + eps0)*latent_mask + perturbed_latent*(1-latent_mask)
-
-            watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
+            if noisy_type == 'latent_masked':
+                eps0 = torch.randn_like(perturbed_latent) * std_val_0
+                perturbed_latent_1 = (perturbed_latent + eps0) * latent_mask + perturbed_latent * (1 - latent_mask)
+                watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
+            elif noisy_type == 'vae_roundtrip':
+                wm_decoded = self.pipe.vae.decode(perturbed_latent).sample
+                re_encoded = self.pipe.vae.encode(wm_decoded).latent_dist.mean
+                perturbed_latent_1 = re_encoded * latent_mask + perturbed_latent * (1 - latent_mask)
+                watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
+            elif noisy_type == 'latent_full':
+                eps0 = torch.randn_like(perturbed_latent) * std_val_0
+                perturbed_latent_1 = perturbed_latent + eps0
+                watermarked_image_1 = self.pipe.vae.decode(perturbed_latent_1).sample
+            else:
+                raise ValueError(
+                    f"Unknown noisy_type='{noisy_type}'. "
+                    "Expected 'latent_masked', 'vae_roundtrip', or 'latent_full'."
+                )
             watermarked_image_1 = (watermarked_image_1 + 1) / 2
             watermarked_image_1 = torch.clamp(watermarked_image_1, 0.0, 1.0)
 
@@ -404,13 +419,18 @@ class LocMark:
         
         return 1 - dice_coeff
     
-    def _hard_negative_mining_loss(self, scores, target_val, k_percent=0.1):        
-        pixel_losses = F.relu(target_val - scores)
-        pixel_losses = pixel_losses.view(-1)
-        
-        num_hard = int(pixel_losses.numel() * k_percent)
-        if num_hard < 1: num_hard = 1
-        
-        top_k_loss, _ = torch.topk(pixel_losses, num_hard)
+    def _hard_negative_mining_loss(self, scores, target_val, k_percent=0.1):
+        hnm_type = getattr(self.args, 'hnm_type', 'topk')
+        hinge = F.relu(target_val - scores).view(-1)
 
-        return top_k_loss.mean()
+        if hnm_type == 'topk':
+            num_hard = max(1, int(hinge.numel() * k_percent))
+            top_k_loss, _ = torch.topk(hinge, num_hard)
+            return top_k_loss.mean()
+
+        if hnm_type == 'focal':
+            gamma = getattr(self.args, 'focal_gamma', 2.0)
+            weights = (hinge / (target_val + 1e-8)) ** gamma
+            return (weights * hinge).mean()
+
+        raise ValueError(f"Unknown hnm_type='{hnm_type}'. Expected 'topk' or 'focal'.")
