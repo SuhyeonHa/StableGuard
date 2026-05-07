@@ -29,10 +29,10 @@ pip install git+https://github.com/huggingface/transformers.git
 pip install git+https://github.com/scraed/LanPaint.git
 
 # python eval_AGE.py
-# python -m locmark.main
+python -m locmark.main
 # python analysis_layers.py
 # bash scripts/eval.sh
 # python -m locmark.train_decoder
 # bash scripts/eval_rebuttal.sh
 
-GPU_ID=0 bash scripts/eval_rebuttal_ablation_loss.sh
+# GPU_ID=0 bash scripts/eval_rebuttal_ablation_loss.sh

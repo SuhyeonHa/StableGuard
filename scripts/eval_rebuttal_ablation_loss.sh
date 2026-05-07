@@ -14,10 +14,10 @@ target_dirs=(
     # "ours_ablation/latent_full/20260506-163756"
 
     # R3 hyperparameter sensitivity
-    "ours_ablation/hnm-weak/20260506-180155"
-    "ours_ablation/hnm-strong/20260506-180417"
-    "ours_ablation/noise-weak/20260506-180633"
-    "ours_ablation/noise-strong/20260506-180819"
+    # "ours_ablation/hnm-weak/20260506-180155"
+    # "ours_ablation/hnm-strong/20260506-180417"
+    # "ours_ablation/noise-weak/20260506-180633"
+    # "ours_ablation/noise-strong/20260506-180819"
 )
 
 for dir in "${target_dirs[@]}"; do
