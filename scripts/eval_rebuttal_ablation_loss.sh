@@ -10,12 +10,13 @@ GPU_ID=${GPU_ID:-2}
 target_dirs=(
     # R2 loss / noisy-branch design ablations
     # "ours_ablation/focal/20260506-162523"
-    "ours_ablation/focal-1/20260507-073349"
+    # "ours_ablation/focal-1/20260507-073349"
     # "ours_ablation/vae_roundtrip/20260506-163311"
     # "ours_ablation/latent_full/20260506-163756"
 
     # R3 hyperparameter sensitivity
     # "ours_ablation/hnm-weak/20260506-180155"
+    "ours_ablation/hnm-15/20260507-101942"
     # "ours_ablation/hnm-strong/20260506-180417"
     # "ours_ablation/noise-weak/20260506-180633"
     # "ours_ablation/noise-strong/20260506-180819"

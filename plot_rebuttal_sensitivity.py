@@ -1,8 +1,8 @@
 # R3 hyperparameter sensitivity results.
 # Values are from the evaluated LocMark ablation runs.
-hnm_x = ["5%", "10%", "20%"]
-hnm_psnr = [32.13, 32.80, 33.25]
-hnm_sp = [0.95, 0.95, 0.96]
+hnm_x = ["5%", "10%", "15%"]
+hnm_psnr = [32.13, 32.80, 33.08]
+hnm_sp = [0.95, 0.95, 0.95]
 hnm_fr = [0.93, 0.92, 0.92]
 
 noise_x = ["[0,0.10]", "[0,0.25]", "[0,0.50]"]
