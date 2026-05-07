@@ -92,7 +92,7 @@ class Params:
         self.anchor_type = "submitted"
 
         # --- Robustness Parameters ---
-        self.eps0_std = [0.0, 0.50] # Latent noise sigma range
+        self.eps0_std = [0.0, 0.25] # Latent noise sigma range
         self.aug_noise_std = [0.0, 0.025] # Image-space Gaussian noise sigma range in [0,1]
         
         # --- Demo/Evaluation Parameters ---

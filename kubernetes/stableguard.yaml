@@ -1,17 +1,17 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: suhyeon-abalation-noise-strong
+  name: suhyeon-eval-ablation
 spec:
   template:
     spec:
       runtimeClassName: nvidia
       # Uncomment this node Selector if you want to use a specific GPU type
       nodeSelector:
-        nvidia.com/gpu.product: NVIDIA-TITAN-RTX
+        nvidia.com/gpu.product: NVIDIA-GeForce-RTX-3090
       
       # Uncomment below if you want to use a specific node
-      nodeName: sgvr-gpu-004
+      nodeName: sgvr-gpu-017
 
       # Uncomment below if you want to use a GPU device with memory > 15000
       # affinity:
