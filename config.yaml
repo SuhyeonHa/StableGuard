@@ -9,8 +9,15 @@ end_idx: 100
 aug_type: null
 aug_param: null
 save_aug_image: false
-tamper_mode: "ldm" # ["ldm", "controlnet", "hdpainter", "zero_mask", "vae_regen", "sdxl", "flux", "flux2", "brushnet"]
+tamper_mode: "ldm" # ["ldm", "lora", "controlnet", "hdpainter", "zero_mask", "vae_regen", "sdxl", "flux", "flux2", "brushnet"]
 brushnet_checkpoint_dir: "/mnt/nas5/suhyeon/checkpoints/brushnet"
+
+# LCM-LoRA inpainting settings (tamper_mode="lora")
+lora_model_name: "latent-consistency/lcm-lora-sdv1-5"
+lora_prompt: ""
+lora_num_inference_steps: 4
+lora_guidance_scale: 4.0
+lora_fuse: true
 
 weight_paths:
   omniguard: "/mnt/nas5/suhyeon/checkpoints/omniguard/"

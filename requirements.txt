@@ -38,6 +38,7 @@ numpy==2.1.2
 # nvidia-nvtx-cu11==11.8.86
 omegaconf==2.3.0
 opencv-python==4.12.0.88
+peft==0.19.1
 packaging==25.0
 pillow==11.0.0
 piq==0.8.0

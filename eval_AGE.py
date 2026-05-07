@@ -1,4 +1,5 @@
 import os
+import importlib.util
 import warnings
 
 import piq
@@ -12,7 +13,7 @@ from torchvision.transforms import transforms as T
 from tqdm import tqdm
 import cv2
 import numpy as np
-from diffusers import AutoencoderKL, StableDiffusionInpaintPipeline, AutoPipelineForInpainting, FluxFillPipeline
+from diffusers import AutoencoderKL, StableDiffusionInpaintPipeline, AutoPipelineForInpainting, FluxFillPipeline, LCMScheduler
 from diffusers.pipelines import StableDiffusion3ControlNetInpaintingPipeline
 from diffusers import SD3ControlNetModel
 from diffusers import QwenImageControlNetModel, QwenImageControlNetInpaintPipeline
@@ -474,11 +475,34 @@ class Evaluation_Fidelity(object):
 
 
 @torch.no_grad()
-def generate_watermark_image(norm, weight_path, target_model, src_image_path, save_path, edit_model_name, seed, num_bits=48, model_size=512, eval_size=256, start_idx=0, end_idx=None, tamper_mode='inpaint', wm_strength=None, brushnet_checkpoint_dir=None):
+def generate_watermark_image(
+    norm,
+    weight_path,
+    target_model,
+    src_image_path,
+    save_path,
+    edit_model_name,
+    seed,
+    num_bits=48,
+    model_size=512,
+    eval_size=256,
+    start_idx=0,
+    end_idx=None,
+    tamper_mode='inpaint',
+    wm_strength=None,
+    brushnet_checkpoint_dir=None,
+    lora_model_name="latent-consistency/lcm-lora-sdv1-5",
+    lora_prompt="",
+    lora_num_inference_steps=4,
+    lora_guidance_scale=4.0,
+    lora_fuse=True,
+):
     # create output subdirectories
     res = []
     if tamper_mode == 'ldm':
         res = ['cover_images', 'ldm_spliced_images', 'ldm_spliceless_images', 'gt', 'msgs']
+    elif tamper_mode == 'lora':
+        res = ['cover_images', 'lora_spliced_images', 'lora_spliceless_images', 'gt', 'msgs']
     elif tamper_mode == 'controlnet':
         res = ['cover_images', 'control_spliced_images', 'control_spliceless_images', 'gt', 'msgs']
     elif tamper_mode == 'hdpainter':
@@ -516,6 +540,24 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
             "runwayml/stable-diffusion-v1-5", controlnet=controlnet, torch_dtype=torch.float16, cache_dir='/mnt/nas5/suhyeon/caches/', safety_checker=None
         ).to('cuda')
         pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
+    elif tamper_mode == 'lora':
+        if importlib.util.find_spec("peft") is None:
+            raise RuntimeError(
+                'tamper_mode="lora" requires the PEFT backend for diffusers LoRA loading. '
+                'Install it in the stableguard environment with: '
+                '/opt/conda/envs/stableguard/bin/pip install peft'
+            )
+        pipe = AutoPipelineForInpainting.from_pretrained(
+            edit_model_name,
+            torch_dtype=torch.float16,
+            variant="fp16",
+            cache_dir='/mnt/nas5/suhyeon/caches/',
+            safety_checker=None
+        ).to('cuda')
+        pipe.scheduler = LCMScheduler.from_config(pipe.scheduler.config)
+        pipe.load_lora_weights(lora_model_name)
+        if lora_fuse:
+            pipe.fuse_lora()
     elif tamper_mode == 'hdpainter':
         pipe = get_inpainting_function(
             model_id='ds8_inp',
@@ -827,6 +869,81 @@ def generate_watermark_image(norm, weight_path, target_model, src_image_path, sa
                     cover_image_pil.save(os.path.join(save_path, 'cover_images', save_file_name.replace("jpg", "png")))
                 spliced_image_pil.save(os.path.join(save_path, 'ldm_spliced_images', save_file_name.replace("jpg", "png")))
                 spliceless_image_pil.save(os.path.join(save_path, 'ldm_spliceless_images', save_file_name.replace("jpg", "png")))
+
+                # save ground-truth mask as image tensor and message vector as .pt file
+                if target_model == 'clean':
+                    # clean 모드: gt 마스크를 eval_size(256)로 nearest resize해서 저장
+                    mask_gt = F.interpolate(mask, size=(eval_size, eval_size), mode='nearest')
+                    save_image(1-mask_gt, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+                else:
+                    save_image(1-mask, os.path.join(save_path, 'gt', save_file_name.replace("jpg", "png")), normalize=True, scale_each=True)
+                # torch.save(msg, os.path.join(save_path, 'msgs', save_file_name.split(".")[0] + '.pt'))
+
+        elif tamper_mode == 'lora':
+            # inpaint and splice in 512x512 using SD inpainting + LCM-LoRA
+            inpaint_input = F.interpolate(cover_images, size=(512, 512), mode="bilinear", align_corners=False)
+            generated_images = pipe(
+                prompt=lora_prompt,
+                image=inpaint_input,
+                mask_image=masks,
+                generator=generator,
+                num_inference_steps=lora_num_inference_steps,
+                guidance_scale=lora_guidance_scale,
+            ).images[0]
+
+            # pil to tensor, normalize to [-1,1], add batch dim
+            generated_images = ToTensor()(generated_images).cuda()
+            generated_images = (generated_images * 2.0 - 1.0).unsqueeze(0)
+
+            # composite at 512x512, then downsample to original size
+            masks = F.interpolate(masks, size=(512, 512), mode="nearest")
+            spliced_images = masks * generated_images + (1 - masks) * inpaint_input # operation in [-1, 1]
+            spliceless_images = generated_images
+
+            # adjust to each model's training size
+            spliced_images = F.interpolate(spliced_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+            spliceless_images = F.interpolate(spliceless_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+            cover_images = F.interpolate(cover_images, size=(model_size, model_size), mode="bilinear", align_corners=False)
+
+            # save per-image outputs: cover, tamper, ground-truth mask, and message vector
+            for i in range(images.size(0)):
+                save_file_name = image_names[i]
+                cover_image = cover_images[i]
+                spliced_image = spliced_images[i]
+                spliceless_image = spliceless_images[i]
+                mask = masks[i]
+                # msg = msgs[i]
+
+                # make each a single-image tensor and convert to uint8 PIL before saving
+                cover_image = cover_image.unsqueeze(0)
+                spliced_image = spliced_image.unsqueeze(0)
+                spliceless_image = spliceless_image.unsqueeze(0)
+                mask = mask.unsqueeze(0)
+                # msg = msg.unsqueeze(0)
+
+                # cover image: convert from model range [-1,1] to [0,255] uint8
+                cover_image = (cover_image / 2 + 0.5).clamp(0, 1)
+                cover_image = cover_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                cover_image = (cover_image * 255).astype(np.uint8)
+                cover_image_pil = Image.fromarray(cover_image)
+
+                # spliced image: same conversion
+                spliced_image = (spliced_image / 2 + 0.5).clamp(0, 1)
+                spliced_image = spliced_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                spliced_image = (spliced_image * 255).astype(np.uint8)
+                spliced_image_pil = Image.fromarray(spliced_image)
+
+                # spliceless image: same conversion
+                spliceless_image = (spliceless_image / 2 + 0.5).clamp(0, 1)
+                spliceless_image = spliceless_image.squeeze(0).cpu().clamp(0, 1).numpy().transpose(1, 2, 0)
+                spliceless_image = (spliceless_image * 255).astype(np.uint8)
+                spliceless_image_pil = Image.fromarray(spliceless_image)
+
+                # save cover and edited images as PNG (replace .jpg extension if present)
+                if target_model != 'ours':
+                    cover_image_pil.save(os.path.join(save_path, 'cover_images', save_file_name.replace("jpg", "png")))
+                spliced_image_pil.save(os.path.join(save_path, 'lora_spliced_images', save_file_name.replace("jpg", "png")))
+                spliceless_image_pil.save(os.path.join(save_path, 'lora_spliceless_images', save_file_name.replace("jpg", "png")))
 
                 # save ground-truth mask as image tensor and message vector as .pt file
                 if target_model == 'clean':
@@ -1777,6 +1894,8 @@ if __name__ == "__main__":
     eval_setting = []
     if c['tamper_mode'] == 'ldm':
         eval_setting = ["ldm_spliced", "ldm_spliceless"]
+    elif c['tamper_mode'] == 'lora':
+        eval_setting = ["lora_spliced", "lora_spliceless"]
     elif c['tamper_mode'] == 'controlnet':
         eval_setting = ["control_spliced", "control_spliceless"]
     elif c['tamper_mode'] == 'hdpainter':
@@ -1814,21 +1933,26 @@ if __name__ == "__main__":
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
     # save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    generate_watermark_image(norm=c['normalization'],
-                             weight_path=c['weight_path'],
-                             target_model=c['target_model'],
-                             src_image_path=c['src_image_path'],
-                             save_path=c['save_path'],
-                             edit_model_name=c['edit_model_name'],
-                             seed=c['seed'],
-                             num_bits=c['num_bits'],
-                             model_size=c['model_size'],
-                             eval_size=c['eval_size'],
-                             start_idx=c['start_idx'],
-                             end_idx=c['end_idx'],
-                             tamper_mode=c['tamper_mode'],
-                             wm_strength=c['wm_strength'],
-                             brushnet_checkpoint_dir=c.get('brushnet_checkpoint_dir', None))
+    # generate_watermark_image(norm=c['normalization'],
+    #                          weight_path=c['weight_path'],
+    #                          target_model=c['target_model'],
+    #                          src_image_path=c['src_image_path'],
+    #                          save_path=c['save_path'],
+    #                          edit_model_name=c['edit_model_name'],
+    #                          seed=c['seed'],
+    #                          num_bits=c['num_bits'],
+    #                          model_size=c['model_size'],
+    #                          eval_size=c['eval_size'],
+    #                          start_idx=c['start_idx'],
+    #                          end_idx=c['end_idx'],
+    #                          tamper_mode=c['tamper_mode'],
+    #                          wm_strength=c['wm_strength'],
+    #                          brushnet_checkpoint_dir=c.get('brushnet_checkpoint_dir', None),
+    #                          lora_model_name=c.get('lora_model_name', "latent-consistency/lcm-lora-sdv1-5"),
+    #                          lora_prompt=c.get('lora_prompt', ""),
+    #                          lora_num_inference_steps=c.get('lora_num_inference_steps', 4),
+    #                          lora_guidance_scale=c.get('lora_guidance_scale', 4.0),
+    #                          lora_fuse=c.get('lora_fuse', True))
 
     # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     refiner_tag = '_refiner' if (c['target_model'] == 'ours' and c['use_refiner']) else ''
@@ -1853,8 +1977,8 @@ if __name__ == "__main__":
         eva.run(pred_mask_dir, tamper_mode=c['tamper_mode'])
 
     # # 4) Evaluate fidelity between watermarked and original images
-    eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'], end_idx=c['end_idx'])
-    eva_fid.run(f"{c['save_path']}/cover_images")
+    # eva_fid = Evaluation_Fidelity(f"{c['save_path']}/cover_images", f"{c['src_image_path']}", eval_size=c['eval_size'], end_idx=c['end_idx'])
+    # eva_fid.run(f"{c['save_path']}/cover_images")
 
     # 5) eval_dist: cossim distribution analysis (ours only)
     # if c.get('eval_dist', False) and c['target_model'] == 'ours':

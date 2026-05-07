@@ -10,6 +10,7 @@ GPU_ID=${GPU_ID:-2}
 target_dirs=(
     # R2 loss / noisy-branch design ablations
     # "ours_ablation/focal/20260506-162523"
+    "ours_ablation/focal-1/20260507-073349"
     # "ours_ablation/vae_roundtrip/20260506-163311"
     # "ours_ablation/latent_full/20260506-163756"
 
