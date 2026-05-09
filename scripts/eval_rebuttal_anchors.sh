@@ -6,11 +6,11 @@ SAVE_BASE=/mnt/nas5/suhyeon/projects/apt_rebuttal
 
 target_dirs=(
     # "ours_ablation/gaussian/20260505-134927"
-    "ours_ablation/quantized/20260505-134555"
-    "ours_ablation/zeromean/20260505-134809"
+    # "ours_ablation/quantized/20260505-134555"
+    # "ours_ablation/zeromean/20260505-134809"
     "ours_ablation/rademacher/20260505-135204"
     # "ours_ablation/pca/20260505-150424"
-    "ours_ablation/centering/20260505-155259"
+    # "ours_ablation/centering/20260505-155259"
 )
 
 for dir in "${target_dirs[@]}"; do
@@ -25,6 +25,6 @@ for dir in "${target_dirs[@]}"; do
         start_idx=0 \
         end_idx=$NUM_IMG \
         tamper_mode=$TAMPER_MODE \
-        use_refiner=False \
+        use_refiner=True \
         anchor_type=$anchor_type
 done

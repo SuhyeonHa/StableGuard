@@ -41,6 +41,15 @@ def extract_region_as_pil(tensor, mask, fill_value=0.5):
     return to_pil_image(region.squeeze(0).clamp(0, 1).cpu())
 
 
+def normalized_entropy(gray_img: np.ndarray, mask_np: np.ndarray) -> float:
+    """Normalized Shannon entropy over grayscale pixels selected by mask."""
+    pixels = gray_img[mask_np > 0.5].flatten()
+    hist, _ = np.histogram(pixels, bins=256, range=(0, 255))
+    hist = hist[hist > 0].astype(float)
+    hist /= hist.sum()
+    return float(-np.sum(hist * np.log(hist))) / np.log(256)
+
+
 def run_analysis(args, save_path, data_path):
     device = torch.device(args.device)
 
@@ -65,6 +74,7 @@ def run_analysis(args, save_path, data_path):
     os.makedirs(sample_img_dir, exist_ok=True)
 
     bg_complexity_list = []
+    fg_complexity_list = []
     bg_cossim_list     = []
     fg_clip_sim_list   = []
     fg_cossim_list     = []
@@ -82,6 +92,7 @@ def run_analysis(args, save_path, data_path):
 
         # ── BG complexity: normalized Shannon entropy ────────────────────────
         bg_mask_np = bg_mask[0, 0].cpu().numpy()
+        fg_mask_np = fg_mask[0, 0].cpu().numpy()
 
         # use clean image if provided, else fall back to wm_tensor
         if args.clean_path is not None:
@@ -105,11 +116,8 @@ def run_analysis(args, save_path, data_path):
                 cv2.COLOR_RGB2GRAY,
             )
 
-        bg_pixels = complexity_gray[bg_mask_np > 0.5].flatten()
-        hist, _ = np.histogram(bg_pixels, bins=256, range=(0, 255))
-        hist = hist[hist > 0].astype(float)
-        hist /= hist.sum()
-        bg_complexity = float(-np.sum(hist * np.log(hist))) / np.log(256)
+        bg_complexity = normalized_entropy(complexity_gray, bg_mask_np)
+        fg_complexity = normalized_entropy(complexity_gray, fg_mask_np)
 
         if i < 5:
             if args.clean_path is not None and clean_file is not None:
@@ -130,6 +138,7 @@ def run_analysis(args, save_path, data_path):
             plt.close(fig_s)
 
         bg_complexity_list.append(bg_complexity)
+        fg_complexity_list.append(fg_complexity)
         bg_cossim_list.append(stats['inp_outside_cossim'])
 
         # ── FG-BG CLIP semantic similarity ───────────────────────────────────
@@ -147,6 +156,7 @@ def run_analysis(args, save_path, data_path):
 
     data = {
         'bg_complexity': bg_complexity_list,
+        'fg_complexity': fg_complexity_list,
         'bg_cossim':     bg_cossim_list,
         'fg_clip_sim':   fg_clip_sim_list,
         'fg_cossim':     fg_cossim_list,
@@ -158,39 +168,118 @@ def run_analysis(args, save_path, data_path):
 
 
 def run_plot(data, output_fig):
+    from matplotlib.ticker import FormatStrFormatter, LinearLocator, MaxNLocator
+
     bg_complexity_list = data['bg_complexity']
+    fg_complexity_list = data.get('fg_complexity')
     bg_cossim_list     = data['bg_cossim']
     fg_clip_sim_list   = data['fg_clip_sim']
     fg_cossim_list     = data['fg_cossim']
 
     r1, p1 = pearsonr(bg_complexity_list, bg_cossim_list)
-    r2, p2 = pearsonr(fg_clip_sim_list,   fg_cossim_list)
+    r2, p2 = pearsonr(fg_clip_sim_list, fg_cossim_list)
+    r3, p3 = pearsonr(fg_clip_sim_list, bg_cossim_list)
     print(f'Plot 1  BG complexity  vs BG cos_sim : r={r1:.3f}  p={p1:.3f}')
+    if fg_complexity_list is not None:
+        r_fg_comp, p_fg_comp = pearsonr(fg_complexity_list, fg_cossim_list)
+        print(f'Plot 1  FG complexity  vs FG cos_sim : r={r_fg_comp:.3f}  p={p_fg_comp:.3f}')
+    else:
+        print('Plot 1  FG complexity missing. Re-run with --mode analyze to save fg_complexity.')
     print(f'Plot 2  FG-BG CLIP sim vs FG cos_sim : r={r2:.3f}  p={p2:.3f}')
+    print(f'Plot 2  FG-BG CLIP sim vs BG cos_sim : r={r3:.3f}  p={p3:.3f}')
 
     margin = 0.01
     y_min = min(min(bg_cossim_list), min(fg_cossim_list)) - margin
     y_max = max(max(bg_cossim_list), max(fg_cossim_list)) + margin
 
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    output_root, output_ext = os.path.splitext(output_fig)
+    if output_ext == '':
+        output_ext = '.png'
+    complexity_fig = output_root + '_complexity' + output_ext
+    semantic_fig = output_root + '_semantic' + output_ext
 
-    axes[0].scatter(bg_complexity_list, bg_cossim_list,
-                    alpha=0.6, edgecolors='none', color='steelblue')
-    axes[0].set_xlabel('BG Complexity')
-    axes[0].set_ylabel('Cos. Sim. w/ Anchor')
-    axes[0].yaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
-    axes[0].set_ylim(y_min, y_max)
+    def save_figure(fig, path, dpi=150):
+        fig.savefig(path, dpi=dpi, bbox_inches='tight')
+        print(f'Saved → {path}')
 
-    axes[1].scatter(fg_clip_sim_list, fg_cossim_list,
-                    alpha=0.6, edgecolors='none', color='darkorange')
-    axes[1].set_xlabel('FG-BG Semantic Similarity')
-    axes[1].set_ylabel('Cos. Sim. w/ Anchor')
-    axes[1].yaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
-    axes[1].set_ylim(y_min, y_max)
+        pdf_path = os.path.splitext(path)[0] + '.pdf'
+        if os.path.abspath(pdf_path) != os.path.abspath(path):
+            fig.savefig(pdf_path, bbox_inches='tight')
+            print(f'Saved → {pdf_path}')
 
-    plt.tight_layout()
-    plt.savefig(output_fig, dpi=150, bbox_inches='tight')
-    print(f'Saved → {output_fig}')
+    def plot_complexity(ax, show_ylabel=True):
+        ax.scatter(bg_complexity_list, bg_cossim_list,
+                   s=70, alpha=0.75, edgecolors='none', color='steelblue', label='Background')
+        if fg_complexity_list is not None:
+            ax.scatter(fg_complexity_list, fg_cossim_list,
+                       s=70, alpha=0.75, edgecolors='none', color='darkorange', label='Foreground')
+        ax.set_xlabel('Background\nComplexity', fontsize=29, fontweight='bold')
+        if show_ylabel:
+            ax.set_ylabel('Cos. Sim.', fontsize=29, fontweight='bold')
+        ax.xaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+        ax.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+        ax.yaxis.set_major_locator(LinearLocator(5))
+        ax.set_ylim(y_min, y_max)
+        ax.tick_params(axis='both', labelsize=23)
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_fontweight('bold')
+        ax.grid(True, axis='y', alpha=0.3)
+
+    def plot_semantic(ax, show_ylabel=True):
+        ax.scatter(fg_clip_sim_list, bg_cossim_list,
+                   s=70, alpha=0.75, edgecolors='none', color='steelblue', label='Background')
+        ax.scatter(fg_clip_sim_list, fg_cossim_list,
+                   s=70, alpha=0.75, edgecolors='none', color='darkorange', label='Foreground')
+        ax.set_xlabel('FG-BG Semantic\nSimilarity', fontsize=29, fontweight='bold')
+        if show_ylabel:
+            ax.set_ylabel('Cos. Sim.\nw/ Anchor', fontsize=29, fontweight='bold')
+        ax.xaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+        ax.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+        ax.yaxis.set_major_locator(LinearLocator(5))
+        ax.set_ylim(y_min, y_max)
+        ax.tick_params(axis='both', labelsize=23)
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_fontweight('bold')
+        ax.grid(True, axis='y', alpha=0.3)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6.5))
+    plot_complexity(axes[0], show_ylabel=True)
+    plot_semantic(axes[1], show_ylabel=False)
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    legend = fig.legend(
+        handles,
+        labels,
+        loc='upper center',
+        ncol=2,
+        frameon=True,
+        prop={'size': 26, 'weight': 'bold'},
+        bbox_to_anchor=(0.5, 0.995),
+        columnspacing=1.0,
+        handletextpad=0.5,
+        markerscale=1.8,
+    )
+    for text in legend.get_texts():
+        text.set_fontweight('bold')
+
+    plt.tight_layout(rect=(0, 0, 1, 0.88))
+    fig.subplots_adjust(wspace=0.25)
+    save_figure(fig, output_fig)
+    plt.close(fig)
+
+    # fig_c, ax_c = plt.subplots(figsize=(5, 4))
+    # plot_complexity(ax_c)
+    # fig_c.tight_layout()
+    # save_figure(fig_c, complexity_fig)
+    # plt.close(fig_c)
+
+    # fig_s, ax_s = plt.subplots(figsize=(5, 4))
+    # plot_semantic(ax_s)
+    # fig_s.tight_layout()
+    # save_figure(fig_s, semantic_fig)
+    # plt.close(fig_s)
 
 
 def main():
