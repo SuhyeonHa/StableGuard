@@ -1,11 +1,11 @@
 """
 Offline analysis: scatter plots for R3 C3 rebuttal.
 
-  Plot 1: BG complexity (normalized Shannon entropy) vs BG anchor alignment (cos_sim)
+  Plot 1: Background complexity vs anchor alignment (cos_sim)
   Plot 2: FG-BG semantic similarity (CLIP cosine sim) vs FG anchor alignment
 
 Two modes:
-  --mode analyze   Run full analysis (CLIP + entropy) and save results to
+  --mode analyze   Run full analysis (CLIP + background complexity) and save results to
                    {save_path}/decoupling_data.json. Also generates the plot.
   --mode plot      Skip analysis; load existing decoupling_data.json and re-plot only.
 
@@ -41,13 +41,14 @@ def extract_region_as_pil(tensor, mask, fill_value=0.5):
     return to_pil_image(region.squeeze(0).clamp(0, 1).cpu())
 
 
-def normalized_entropy(gray_img: np.ndarray, mask_np: np.ndarray) -> float:
-    """Normalized Shannon entropy over grayscale pixels selected by mask."""
-    pixels = gray_img[mask_np > 0.5].flatten()
-    hist, _ = np.histogram(pixels, bins=256, range=(0, 255))
-    hist = hist[hist > 0].astype(float)
-    hist /= hist.sum()
-    return float(-np.sum(hist * np.log(hist))) / np.log(256)
+def masked_edge_rate(edge_map: np.ndarray, mask_np: np.ndarray) -> float:
+    """Canny edge-pixel ratio used as the background complexity value."""
+    mask_bool = mask_np > 0.5
+    denom = int(mask_bool.sum())
+    if denom == 0:
+        return 0.0
+
+    return float(np.count_nonzero(edge_map[mask_bool])) / denom
 
 
 def run_analysis(args, save_path, data_path):
@@ -74,7 +75,6 @@ def run_analysis(args, save_path, data_path):
     os.makedirs(sample_img_dir, exist_ok=True)
 
     bg_complexity_list = []
-    fg_complexity_list = []
     bg_cossim_list     = []
     fg_clip_sim_list   = []
     fg_cossim_list     = []
@@ -90,9 +90,9 @@ def run_analysis(args, save_path, data_path):
         wm_tensor        = tensors['wm']
         inpainted_tensor = tensors['inpainted']
 
-        # ── BG complexity: normalized Shannon entropy ────────────────────────
+        # ── Background complexity: Canny edge pixels / BG pixels ────────────
         bg_mask_np = bg_mask[0, 0].cpu().numpy()
-        fg_mask_np = fg_mask[0, 0].cpu().numpy()
+        clean_file = None
 
         # use clean image if provided, else fall back to wm_tensor
         if args.clean_path is not None:
@@ -104,20 +104,20 @@ def run_analysis(args, save_path, data_path):
             if clean_file is not None:
                 bgr = cv2.imread(clean_file)
                 bgr = cv2.resize(bgr, (model_size, model_size))
-                complexity_gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+                edge_gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
             else:
-                complexity_gray = cv2.cvtColor(
+                edge_gray = cv2.cvtColor(
                     (wm_tensor[0].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8),
                     cv2.COLOR_RGB2GRAY,
                 )
         else:
-            complexity_gray = cv2.cvtColor(
+            edge_gray = cv2.cvtColor(
                 (wm_tensor[0].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8),
                 cv2.COLOR_RGB2GRAY,
             )
 
-        bg_complexity = normalized_entropy(complexity_gray, bg_mask_np)
-        fg_complexity = normalized_entropy(complexity_gray, fg_mask_np)
+        edge_map = cv2.Canny(edge_gray, args.canny_low, args.canny_high)
+        bg_complexity = masked_edge_rate(edge_map, bg_mask_np)
 
         if i < 5:
             if args.clean_path is not None and clean_file is not None:
@@ -128,17 +128,16 @@ def run_analysis(args, save_path, data_path):
                 sample_rgb = (wm_tensor[0].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
             fig_s, ax_s = plt.subplots(figsize=(3, 3))
             ax_s.imshow(sample_rgb)
-            ax_s.set_title(f'entropy={bg_complexity:.3f}', fontsize=10)
+            ax_s.set_title(f'bg_complexity={bg_complexity:.3f}', fontsize=10)
             ax_s.axis('off')
             fig_s.tight_layout()
             fig_s.savefig(
-                os.path.join(sample_img_dir, f'{stem}_entropy{bg_complexity:.3f}.png'),
+                os.path.join(sample_img_dir, f'{stem}_bg_complexity{bg_complexity:.3f}.png'),
                 dpi=100, bbox_inches='tight',
             )
             plt.close(fig_s)
 
         bg_complexity_list.append(bg_complexity)
-        fg_complexity_list.append(fg_complexity)
         bg_cossim_list.append(stats['inp_outside_cossim'])
 
         # ── FG-BG CLIP semantic similarity ───────────────────────────────────
@@ -155,8 +154,10 @@ def run_analysis(args, save_path, data_path):
         fg_cossim_list.append(stats['inp_inside_cossim'])
 
     data = {
+        'complexity_metric': 'background_complexity',
+        'canny_low':      args.canny_low,
+        'canny_high':     args.canny_high,
         'bg_complexity': bg_complexity_list,
-        'fg_complexity': fg_complexity_list,
         'bg_cossim':     bg_cossim_list,
         'fg_clip_sim':   fg_clip_sim_list,
         'fg_cossim':     fg_cossim_list,
@@ -170,8 +171,9 @@ def run_analysis(args, save_path, data_path):
 def run_plot(data, output_fig):
     from matplotlib.ticker import FormatStrFormatter, LinearLocator, MaxNLocator
 
-    bg_complexity_list = data['bg_complexity']
-    fg_complexity_list = data.get('fg_complexity')
+    bg_complexity_list = data.get('bg_complexity', data.get('bg_edge_rate'))
+    if bg_complexity_list is None:
+        raise KeyError('No background complexity found. Run with --mode analyze first.')
     bg_cossim_list     = data['bg_cossim']
     fg_clip_sim_list   = data['fg_clip_sim']
     fg_cossim_list     = data['fg_cossim']
@@ -179,12 +181,9 @@ def run_plot(data, output_fig):
     r1, p1 = pearsonr(bg_complexity_list, bg_cossim_list)
     r2, p2 = pearsonr(fg_clip_sim_list, fg_cossim_list)
     r3, p3 = pearsonr(fg_clip_sim_list, bg_cossim_list)
-    print(f'Plot 1  BG complexity  vs BG cos_sim : r={r1:.3f}  p={p1:.3f}')
-    if fg_complexity_list is not None:
-        r_fg_comp, p_fg_comp = pearsonr(fg_complexity_list, fg_cossim_list)
-        print(f'Plot 1  FG complexity  vs FG cos_sim : r={r_fg_comp:.3f}  p={p_fg_comp:.3f}')
-    else:
-        print('Plot 1  FG complexity missing. Re-run with --mode analyze to save fg_complexity.')
+    r_fg_comp, p_fg_comp = pearsonr(bg_complexity_list, fg_cossim_list)
+    print(f'Plot 1  BG complexity vs BG cos_sim : r={r1:.3f}  p={p1:.3f}')
+    print(f'Plot 1  BG complexity vs FG cos_sim : r={r_fg_comp:.3f}  p={p_fg_comp:.3f}')
     print(f'Plot 2  FG-BG CLIP sim vs FG cos_sim : r={r2:.3f}  p={p2:.3f}')
     print(f'Plot 2  FG-BG CLIP sim vs BG cos_sim : r={r3:.3f}  p={p3:.3f}')
 
@@ -198,6 +197,16 @@ def run_plot(data, output_fig):
     complexity_fig = output_root + '_complexity' + output_ext
     semantic_fig = output_root + '_semantic' + output_ext
 
+    def minmax_normalize(values):
+        values_np = np.asarray(values, dtype=float)
+        min_val = values_np.min()
+        max_val = values_np.max()
+        if np.isclose(min_val, max_val):
+            return np.zeros_like(values_np)
+        return (values_np - min_val) / (max_val - min_val)
+
+    bg_complexity_x = minmax_normalize(bg_complexity_list)
+
     def save_figure(fig, path, dpi=150):
         fig.savefig(path, dpi=dpi, bbox_inches='tight')
         print(f'Saved → {path}')
@@ -208,22 +217,20 @@ def run_plot(data, output_fig):
             print(f'Saved → {pdf_path}')
 
     def plot_complexity(ax, show_ylabel=True):
-        ax.scatter(bg_complexity_list, bg_cossim_list,
+        ax.scatter(bg_complexity_x, bg_cossim_list,
                    s=70, alpha=0.75, edgecolors='none', color='steelblue', label='Background')
-        if fg_complexity_list is not None:
-            ax.scatter(fg_complexity_list, fg_cossim_list,
-                       s=70, alpha=0.75, edgecolors='none', color='darkorange', label='Foreground')
+        ax.scatter(bg_complexity_x, fg_cossim_list,
+                   s=70, alpha=0.75, edgecolors='none', color='darkorange', label='Foreground')
         ax.set_xlabel('Background\nComplexity', fontsize=29, fontweight='bold')
         if show_ylabel:
-            ax.set_ylabel('Cos. Sim.', fontsize=29, fontweight='bold')
+            ax.set_ylabel('Anchor Alignment', fontsize=29, fontweight='bold')
         ax.xaxis.set_major_formatter(FormatStrFormatter('%.2f'))
         ax.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
         ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
         ax.yaxis.set_major_locator(LinearLocator(5))
+        ax.set_xlim(-0.02, 1.02)
         ax.set_ylim(y_min, y_max)
         ax.tick_params(axis='both', labelsize=23)
-        for label in ax.get_xticklabels() + ax.get_yticklabels():
-            label.set_fontweight('bold')
         ax.grid(True, axis='y', alpha=0.3)
 
     def plot_semantic(ax, show_ylabel=True):
@@ -240,8 +247,6 @@ def run_plot(data, output_fig):
         ax.yaxis.set_major_locator(LinearLocator(5))
         ax.set_ylim(y_min, y_max)
         ax.tick_params(axis='both', labelsize=23)
-        for label in ax.get_xticklabels() + ax.get_yticklabels():
-            label.set_fontweight('bold')
         ax.grid(True, axis='y', alpha=0.3)
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 6.5))
@@ -289,11 +294,18 @@ def main():
     parser.add_argument('--mode', choices=['analyze', 'plot'], default='analyze',
                         help='"analyze": run full analysis and save; "plot": load saved data and re-plot')
     parser.add_argument('--clean_path', default=None,
-                        help='Directory of clean images for complexity measurement')
+                        help='Directory of clean images for background complexity measurement')
     parser.add_argument('--output_fig', default=None)
     parser.add_argument('--model_size', type=int, default=256)
     parser.add_argument('--device', default='cuda')
+    parser.add_argument('--canny_low', type=int, default=100,
+                        help='Lower threshold for Canny background complexity measurement')
+    parser.add_argument('--canny_high', type=int, default=200,
+                        help='Upper threshold for Canny background complexity measurement')
     args = parser.parse_args()
+
+    if args.canny_low < 0 or args.canny_high < 0 or args.canny_low >= args.canny_high:
+        raise ValueError('--canny_low and --canny_high must be non-negative with canny_low < canny_high.')
 
     if args.output_fig is None:
         args.output_fig = os.path.join(args.save_path, 'scatter_decoupling.png')

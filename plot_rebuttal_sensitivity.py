@@ -1,6 +1,6 @@
 # R3 hyperparameter sensitivity results.
 # Values are from the evaluated LocMark ablation runs.
-hnm_x = ["5%", "10%", "15%"]
+hnm_x = ["0.05", "0.10", "0.15"]
 hnm_psnr = [32.13, 32.80, 33.08]
 hnm_sp = [0.95, 0.95, 0.95]
 hnm_fr = [0.93, 0.92, 0.92]
@@ -48,8 +48,8 @@ def plot_with_matplotlib():
         return ln1, ln2, ln3
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 6.5))
-    lns = plot_sensitivity(axes[0], hnm_x, hnm_psnr, hnm_sp, hnm_fr, "HNM\nratio $k$", is_first=True)
-    plot_sensitivity(axes[1], noise_x, noise_psnr, noise_sp, noise_fr, "Noise\nrange $\\sigma$", is_last=True)
+    lns = plot_sensitivity(axes[0], hnm_x, hnm_psnr, hnm_sp, hnm_fr, "HNM\nratio $\\rho$", is_first=True)
+    plot_sensitivity(axes[1], noise_x, noise_psnr, noise_sp, noise_fr, "Noise\nrange of $\\nu$", is_last=True)
 
     handles = lns[0] + lns[1] + lns[2]
     labels = [h.get_label() for h in handles]

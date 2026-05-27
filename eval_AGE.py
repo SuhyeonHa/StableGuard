@@ -1933,26 +1933,26 @@ if __name__ == "__main__":
     set_seed(c['seed'])
     # 1) generate watermarked/ tampered images and save cover/tamper/gt/msg to disk
     # save_and_print_cfg = save_and_print_config(c, c['save_path'])
-    # generate_watermark_image(norm=c['normalization'],
-    #                          weight_path=c['weight_path'],
-    #                          target_model=c['target_model'],
-    #                          src_image_path=c['src_image_path'],
-    #                          save_path=c['save_path'],
-    #                          edit_model_name=c['edit_model_name'],
-    #                          seed=c['seed'],
-    #                          num_bits=c['num_bits'],
-    #                          model_size=c['model_size'],
-    #                          eval_size=c['eval_size'],
-    #                          start_idx=c['start_idx'],
-    #                          end_idx=c['end_idx'],
-    #                          tamper_mode=c['tamper_mode'],
-    #                          wm_strength=c['wm_strength'],
-    #                          brushnet_checkpoint_dir=c.get('brushnet_checkpoint_dir', None),
-    #                          lora_model_name=c.get('lora_model_name', "latent-consistency/lcm-lora-sdv1-5"),
-    #                          lora_prompt=c.get('lora_prompt', ""),
-    #                          lora_num_inference_steps=c.get('lora_num_inference_steps', 4),
-    #                          lora_guidance_scale=c.get('lora_guidance_scale', 4.0),
-    #                          lora_fuse=c.get('lora_fuse', True))
+    generate_watermark_image(norm=c['normalization'],
+                             weight_path=c['weight_path'],
+                             target_model=c['target_model'],
+                             src_image_path=c['src_image_path'],
+                             save_path=c['save_path'],
+                             edit_model_name=c['edit_model_name'],
+                             seed=c['seed'],
+                             num_bits=c['num_bits'],
+                             model_size=c['model_size'],
+                             eval_size=c['eval_size'],
+                             start_idx=c['start_idx'],
+                             end_idx=c['end_idx'],
+                             tamper_mode=c['tamper_mode'],
+                             wm_strength=c['wm_strength'],
+                             brushnet_checkpoint_dir=c.get('brushnet_checkpoint_dir', None),
+                             lora_model_name=c.get('lora_model_name', "latent-consistency/lcm-lora-sdv1-5"),
+                             lora_prompt=c.get('lora_prompt', ""),
+                             lora_num_inference_steps=c.get('lora_num_inference_steps', 4),
+                             lora_guidance_scale=c.get('lora_guidance_scale', 4.0),
+                             lora_fuse=c.get('lora_fuse', True))
 
     # # 2) run detector over the saved spliced/spliceless images to generate predicted masks and message predictions
     refiner_tag = '_refiner' if (c['target_model'] == 'ours' and c['use_refiner']) else ''
